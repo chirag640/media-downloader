@@ -329,6 +329,16 @@ class AppTest(unittest.TestCase):
         self.assertTrue(app.is_valid_youtube_url("https://soundcloud.com/artist/track"))
         self.assertFalse(app.is_valid_youtube_url("https://malicious-site.com/video"))
 
+    def test_batch_jobs(self):
+        batch_res = self.post_json(
+            "/api/batch_jobs",
+            {"urls": ["https://youtu.be/example", "https://www.instagram.com/reel/C123456/"]},
+        )
+        self.assertEqual(batch_res.status_code, 202)
+        job_id = batch_res.get_json()["job_id"]
+        status = self.client.get(f"/api/jobs/{job_id}").get_json()
+        self.assertEqual(status["status"], "ready")
+
     def test_download_error_cleanup(self):
         FakeYoutubeDL.error = DownloadError("unavailable")
         job_id = self.start_job()

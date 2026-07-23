@@ -1,11 +1,18 @@
 // DOM Elements
+const toastContainer = document.getElementById("toast-container");
 const analyzeForm = document.getElementById("analyze-form");
+const batchForm = document.getElementById("batch-form");
 const downloadForm = document.getElementById("download-form");
 const analyzeButton = document.getElementById("analyze-button");
 const pasteButton = document.getElementById("paste-button");
 const clearButton = document.getElementById("clear-button");
 const downloadButton = document.getElementById("download-button");
+const batchButton = document.getElementById("batch-button");
 const urlInput = document.getElementById("url");
+const batchUrlsTextarea = document.getElementById("batch-urls");
+
+const modeSingleBtn = document.getElementById("mode-single-btn");
+const modeBatchBtn = document.getElementById("mode-batch-btn");
 
 const searchResultsSection = document.getElementById("search-results-section");
 const searchResultsGrid = document.getElementById("search-results-grid");
@@ -42,6 +49,7 @@ const resultCard = document.getElementById("result");
 const resultTitle = document.getElementById("result-title");
 const resultMessage = document.getElementById("result-message");
 const downloadLink = document.getElementById("download-link");
+const audioPlayerWrapper = document.getElementById("audio-player-wrapper");
 const audioPreview = document.getElementById("audio-preview");
 const newDownloadButton = document.getElementById("new-download");
 const cancelButton = document.getElementById("cancel-download");
@@ -62,6 +70,58 @@ const thumbnailDownloadBtn = document.getElementById("thumbnail-download-btn");
 let currentUrl = "";
 let currentJobId = null;
 let currentMediaInfo = null;
+let isBatchMode = false;
+
+// Toast Notification Manager
+function showToast(message, type = "info") {
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+    const icon = type === "error" ? "⚠️" : type === "success" ? "✓" : "ℹ️";
+    toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(-10px)";
+        setTimeout(() => toast.remove(), 300);
+    }, 3500);
+}
+
+// Global Keyboard Paste Shortcut (Ctrl+V / Cmd+V)
+document.addEventListener("paste", async (event) => {
+    // Only intercept if active element is not already an input or textarea
+    const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea") return;
+
+    const pastedText = (event.clipboardData || window.clipboardData).getData("text").trim();
+    if (pastedText) {
+        if (isBatchMode) {
+            batchUrlsTextarea.value += (batchUrlsTextarea.value ? "\n" : "") + pastedText;
+            showToast("Added pasted URL to batch queue", "info");
+        } else {
+            urlInput.value = pastedText;
+            clearButton.hidden = false;
+            showToast("Pasted URL from clipboard", "info");
+            analyzeForm.requestSubmit();
+        }
+    }
+});
+
+// Single vs Batch Mode Switcher
+modeSingleBtn.addEventListener("click", () => {
+    isBatchMode = false;
+    modeSingleBtn.classList.add("active");
+    modeBatchBtn.classList.remove("active");
+    analyzeForm.hidden = false;
+    batchForm.hidden = true;
+});
+
+modeBatchBtn.addEventListener("click", () => {
+    isBatchMode = true;
+    modeBatchBtn.classList.add("active");
+    modeSingleBtn.classList.remove("active");
+    analyzeForm.hidden = true;
+    batchForm.hidden = false;
+});
 
 // Utility functions
 function setBusy(button, busy, label) {
@@ -74,7 +134,7 @@ function setBusy(button, busy, label) {
 function showError(msg) {
     errorMessage.textContent = msg;
     errorBox.hidden = !msg;
-    if (msg) errorBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (msg) showToast(msg, "error");
 }
 
 async function readResponse(response) {
@@ -136,6 +196,7 @@ pasteButton.addEventListener("click", async () => {
             clearButton.hidden = false;
             urlInput.focus();
             showError("");
+            showToast("Pasted URL from clipboard", "info");
         }
     } catch {
         showError("Clipboard permission was blocked. Paste using Ctrl+V / Cmd+V.");
@@ -185,7 +246,7 @@ function renderDetails(media) {
     }
     thumbnail.alt = media.title;
 
-    document.getElementById("media-type-badge").textContent = media.is_playlist ? "Playlist" : "Video";
+    document.getElementById("media-type-badge").textContent = media.is_playlist ? "Playlist" : (media.platform ? media.platform.toUpperCase() : "Media");
     document.getElementById("duration-badge").textContent = formatDuration(media.duration);
     document.getElementById("uploader").textContent = media.uploader;
     document.getElementById("title").textContent = media.title;
@@ -277,7 +338,7 @@ analyzeForm.addEventListener("submit", async (event) => {
     } catch (err) {
         showError(err.message);
     } finally {
-        setBusy(analyzeButton, false, "Fetch Media");
+        setBusy(analyzeButton, false, "Fetch Details");
     }
 });
 
@@ -326,9 +387,8 @@ function renderProgress(job) {
         failureList.replaceChildren();
         for (const fail of job.failures) {
             const li = document.createElement("li");
-            li.className = "failure-item";
             li.innerHTML = `
-                <span class="failure-title">${fail.message || 'Media Item'}</span>
+                <span>${fail.message || 'Media Item'}</span>
                 <span class="failure-reason">${fail.reason}</span>
             `;
             failureList.appendChild(li);
@@ -356,24 +416,24 @@ async function pollJob(jobId) {
             downloadLink.textContent = `Save ${job.filename || "file"}`;
 
             if (job.failures && job.failures.length > 0) {
-                resultTitle.textContent = "Download Completed with Skipped Items";
-                resultMessage.textContent = `${job.success_count || 1} file(s) saved. Inaccessible or private items were automatically skipped below.`;
+                resultTitle.textContent = "Conversion Complete (Skipped Items)";
+                resultMessage.textContent = `${job.success_count || 1} file(s) ready. Inaccessible items were skipped.`;
             } else {
-                resultTitle.textContent = "Download Complete!";
-                resultMessage.textContent = "Your media file has been processed and is ready to save.";
+                resultTitle.textContent = "Conversion Complete!";
+                resultMessage.textContent = "Your media file is ready to save.";
             }
 
-            // HTML5 Audio Preview
+            // Audio Player Preview
             if (job.filename && (job.filename.endsWith(".mp3") || job.filename.endsWith(".m4a") || job.filename.endsWith(".wav"))) {
                 audioPreview.src = fileUrl;
-                audioPreview.hidden = false;
+                audioPlayerWrapper.hidden = false;
             } else {
-                audioPreview.hidden = true;
+                audioPlayerWrapper.hidden = true;
             }
 
-            setBusy(downloadButton, false, "Start Download");
+            setBusy(downloadButton, false, "Start Conversion");
+            showToast("Media ready to download!", "success");
 
-            // Save to Local Download History
             if (currentMediaInfo) {
                 saveToHistory(currentMediaInfo, job);
             }
@@ -384,7 +444,8 @@ async function pollJob(jobId) {
             progressSpinner.hidden = true;
             cancelButton.hidden = true;
             newDownloadButton.hidden = false;
-            setBusy(downloadButton, false, "Start Download");
+            setBusy(downloadButton, false, "Start Conversion");
+            showToast("Download canceled", "info");
             return;
         }
 
@@ -402,16 +463,17 @@ async function pollJob(jobId) {
         cancelButton.hidden = true;
         newDownloadButton.hidden = false;
         setBusy(downloadButton, false, "Try Again");
+        showToast(err.message, "error");
     }
 }
 
-// Start Download Submit Handler
+// Start Single Download Handler
 downloadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     showError("");
     resultCard.hidden = true;
     failureReport.hidden = true;
-    audioPreview.hidden = true;
+    audioPlayerWrapper.hidden = true;
     newDownloadButton.hidden = true;
     cancelButton.hidden = false;
     cancelButton.disabled = false;
@@ -419,7 +481,7 @@ downloadForm.addEventListener("submit", async (event) => {
     progressSpinner.hidden = false;
     progressSection.hidden = false;
     progressFill.style.width = "0%";
-    progressMessage.textContent = "Connecting to YouTube…";
+    progressMessage.textContent = "Connecting to media source…";
     progressPercent.textContent = "0%";
     progressDetail.textContent = "Initializing stream…";
     setBusy(downloadButton, true, "Preparing…");
@@ -452,6 +514,53 @@ downloadForm.addEventListener("submit", async (event) => {
         progressDetail.textContent = err.message;
         cancelButton.hidden = true;
         setBusy(downloadButton, false, "Try Again");
+        showToast(err.message, "error");
+    }
+});
+
+// Start Batch Download Handler
+batchForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    showError("");
+    const urls = batchUrlsTextarea.value.split("\n").map(u => u.trim()).filter(Boolean);
+    if (!urls.length) {
+        showError("Paste at least one media URL into the batch queue.");
+        return;
+    }
+
+    resultCard.hidden = true;
+    failureReport.hidden = true;
+    audioPlayerWrapper.hidden = true;
+    newDownloadButton.hidden = true;
+    cancelButton.hidden = false;
+    cancelButton.disabled = false;
+    progressSpinner.hidden = false;
+    progressSection.hidden = false;
+    progressFill.style.width = "0%";
+    progressMessage.textContent = `Starting batch queue (${urls.length} links)…`;
+    progressSection.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    try {
+        const response = await fetch("/api/batch_jobs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                urls: urls,
+                mode: downloadForm.elements.mode.value,
+                quality: qualitySelect.value,
+                audio_bitrate: audioBitrateSelect.value,
+                audio_format: audioFormatSelect.value,
+            }),
+        });
+        const job = await readResponse(response);
+        currentJobId = job.job_id;
+        pollJob(currentJobId);
+    } catch (err) {
+        progressSpinner.hidden = true;
+        progressMessage.textContent = "Could not start batch";
+        progressDetail.textContent = err.message;
+        cancelButton.hidden = true;
+        showToast(err.message, "error");
     }
 });
 
@@ -481,12 +590,13 @@ newDownloadButton.addEventListener("click", () => {
     currentJobId = null;
     currentMediaInfo = null;
     urlInput.value = "";
+    batchUrlsTextarea.value = "";
     clearButton.hidden = true;
     urlInput.focus();
     window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
-// --- Local Storage History Management ---
+// Local Storage History Management
 const HISTORY_KEY = "mediadrop_download_history";
 
 function getHistory() {
@@ -523,14 +633,14 @@ function renderHistory() {
 
     for (const item of history) {
         const card = document.createElement("div");
-        card.className = "history-item";
+        card.className = "history-card-item";
         card.innerHTML = `
-            <img class="history-thumb" src="${item.thumbnail || ''}" alt="${item.title}">
-            <div class="history-details">
-                <div class="history-title">${item.title}</div>
-                <div class="history-meta">${item.uploader} • ${item.timestamp}</div>
+            <img src="${item.thumbnail || ''}" alt="${item.title}">
+            <div style="flex:1; min-width:0;">
+                <div class="history-item-title">${item.title}</div>
+                <div class="history-item-meta">${item.uploader} • ${item.timestamp}</div>
             </div>
-            <button class="btn-ghost-sm" type="button">Re-fetch</button>
+            <button class="btn-ghost" type="button">Re-fetch</button>
         `;
         card.querySelector("button").addEventListener("click", () => {
             urlInput.value = item.url;
@@ -552,6 +662,7 @@ historyToggleBtn.addEventListener("click", () => {
 clearHistoryBtn.addEventListener("click", () => {
     localStorage.removeItem(HISTORY_KEY);
     renderHistory();
+    showToast("Download history cleared", "info");
 });
 
 // Initialize History on Load

@@ -630,6 +630,122 @@ def start_download():
     return jsonify(job_id=job_id), 202
 
 
+def run_batch_download(
+    job_id: str,
+    job_dir: Path,
+    urls: list[str],
+    mode: str,
+    quality: str,
+    audio_bitrate: str,
+    audio_format: str,
+) -> None:
+    try:
+        total = len(urls)
+        set_job(job_id, status="starting", message=f"Starting batch process ({total} items)…")
+        
+        for idx, url in enumerate(urls, 1):
+            ensure_not_cancelled(job_id)
+            set_job(
+                job_id,
+                status="downloading",
+                progress=round(((idx - 1) / total) * 100, 1),
+                message=f"Downloading batch item {idx} of {total}…",
+            )
+            try:
+                options = build_options(
+                    job_dir,
+                    mode,
+                    quality,
+                    False,
+                    audio_bitrate=audio_bitrate,
+                    audio_format=audio_format,
+                    job_id=job_id,
+                )
+                with yt_dlp.YoutubeDL(options) as downloader:
+                    downloader.download([url])
+            except Exception as exc:
+                clean = friendly_error(exc)
+                with JOBS_LOCK:
+                    if job := JOBS.get(job_id):
+                        job.setdefault("failures", []).append({"message": url, "reason": clean})
+
+        ensure_not_cancelled(job_id)
+        files = collect_finished_files(job_dir)
+        with JOBS_LOCK:
+            failures = JOBS.get(job_id, {}).get("failures") or []
+
+        if not files:
+            if failures:
+                raise RuntimeError(failures[0]["reason"])
+            raise RuntimeError("No files were downloaded in batch.")
+
+        if len(files) > 1:
+            set_job(job_id, status="processing", message="Packaging batch ZIP archive…")
+            output_path = make_zip(job_dir, files, title="batch-download")
+        else:
+            output_path = files[0]
+
+        msg = f"Batch complete. {len(files)} files ready."
+        if failures:
+            msg += f" {len(failures)} skipped."
+
+        set_job(
+            job_id,
+            status="ready",
+            progress=100,
+            filename=output_path.name,
+            path=output_path,
+            message=msg,
+            success_count=len(files),
+            failed_count=len(failures),
+            failures=failures,
+        )
+    except JobCancelled:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        set_job(job_id, status="canceled", message="Batch download canceled.", progress=0)
+    except Exception as exc:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        with JOBS_LOCK:
+            failures = JOBS.get(job_id, {}).get("failures") or []
+        set_job(job_id, status="error", message="Batch download failed.", error=friendly_error(exc), failures=failures)
+
+
+@app.post("/api/batch_jobs")
+def start_batch_download():
+    data = request.get_json(silent=True) or {}
+    raw_urls = data.get("urls") or []
+    if isinstance(raw_urls, str):
+        raw_urls = [u.strip() for u in raw_urls.split("\n") if u.strip()]
+
+    valid_urls = [u for u in raw_urls if is_valid_youtube_url(u)]
+    if not valid_urls:
+        return jsonify(error="Provide at least one valid media URL for batch queue."), 400
+
+    mode = str(data.get("mode", "video"))
+    quality = str(data.get("quality", "720"))
+    audio_bitrate = str(data.get("audio_bitrate", "192"))
+    audio_format = str(data.get("audio_format", "mp3"))
+
+    job_id = uuid.uuid4().hex
+    job_dir = DOWNLOAD_ROOT / job_id
+    job_dir.mkdir(parents=True)
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "status": "queued",
+            "progress": 0,
+            "message": "Queued batch…",
+            "job_dir": job_dir,
+            "failures": [],
+        }
+
+    Thread(
+        target=run_batch_download,
+        args=(job_id, job_dir, valid_urls[:10], mode, quality, audio_bitrate, audio_format),
+        daemon=True,
+    ).start()
+    return jsonify(job_id=job_id, count=len(valid_urls[:10])), 202
+
+
 @app.get("/api/jobs/<job_id>")
 def job_status(job_id: str):
     with JOBS_LOCK:
