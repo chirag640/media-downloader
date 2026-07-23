@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MediaDrop — Premium YouTube & Media Downloader</title>
+    <meta name="description" content="Download YouTube videos, Shorts, Music, and Playlists in 4K MP4 or 320kbps MP3 fast and free locally.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="background-glow"></div>
+    <div class="page-shell">
+        <header class="navbar">
+            <div class="brand">
+                <div class="brand-logo">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </div>
+                <span class="brand-name">Media<span class="gradient-text">Drop</span></span>
+                <span class="badge-pro">PRO v2.5</span>
+            </div>
+            <div class="nav-actions">
+                <button id="history-toggle-btn" class="nav-btn" type="button" title="Recent Downloads">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span>History</span>
+                    <span id="history-count-badge" class="count-badge" hidden>0</span>
+                </button>
+            </div>
+        </header>
+
+        <main>
+            <section class="hero-section">
+                <div class="hero-badge">
+                    <span class="pulse-dot"></span>
+                    <span>Fast, Clean & Private Local Converter</span>
+                </div>
+                <h1>Download Any YouTube Video <br><span class="gradient-text">In 4K & High-Quality MP3</span></h1>
+                <p class="hero-subtitle">Paste links or type search keywords to convert and save instantly with zero ads, tracking, or restrictions.</p>
+            </section>
+
+            <!-- Search Panel -->
+            <section class="panel search-panel">
+                <form id="analyze-form">
+                    <div class="search-box">
+                        <div class="search-input-wrapper">
+                            <span class="input-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                            </span>
+                            <input
+                                id="url"
+                                name="url"
+                                type="text"
+                                placeholder="Paste YouTube link OR type search keywords (e.g. lofi hip hop)..."
+                                autocomplete="off"
+                                required
+                                autofocus
+                            >
+                            <button id="clear-button" class="icon-btn" type="button" title="Clear input" hidden>✕</button>
+                        </div>
+                        <div class="search-buttons">
+                            <button id="paste-button" class="btn-secondary" type="button">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                                <span>Paste</span>
+                            </button>
+                            <button id="analyze-button" class="btn-primary" type="submit">
+                                <span>Fetch Media</span>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="feature-pills">
+                        <span class="pill"><span class="pill-check">✓</span> YouTube Search</span>
+                        <span class="pill"><span class="pill-check">✓</span> Auto-Skip Private Videos</span>
+                        <span class="pill"><span class="pill-check">✓</span> 4K Ultra HD</span>
+                        <span class="pill"><span class="pill-check">✓</span> 320kbps MP3</span>
+                        <span class="pill"><span class="pill-check">✓</span> Time Trimmer</span>
+                    </div>
+                </form>
+
+                <div id="error" class="alert-box" role="alert" hidden>
+                    <span class="alert-icon">⚠️</span>
+                    <span id="error-message"></span>
+                </div>
+            </section>
+
+            <!-- Search Results Cards Container -->
+            <section id="search-results-section" class="panel search-results-panel" hidden>
+                <div class="panel-header">
+                    <h2>Search Results</h2>
+                    <span class="type-pill">Top 5 Videos</span>
+                </div>
+                <div id="search-results-grid" class="search-results-grid"></div>
+            </section>
+
+            <!-- Media Preview Section -->
+            <section id="preview-section" class="panel preview-panel" hidden>
+                <div class="panel-header">
+                    <h2><span class="step-badge">1</span> Media Details</h2>
+                    <span id="media-type-badge" class="type-pill">Video</span>
+                </div>
+
+                <div class="media-card">
+                    <div class="thumbnail-container">
+                        <img id="thumbnail" alt="Video thumbnail preview">
+                        <span id="duration-badge" class="duration-badge">0:00</span>
+                    </div>
+
+                    <div class="media-info">
+                        <span id="uploader" class="uploader-tag">Channel Name</span>
+                        <h3 id="title" class="media-title">Video Title Goes Here</h3>
+
+                        <div class="stats-row">
+                            <div class="stat-item">
+                                <span class="stat-label">Views</span>
+                                <strong id="views" class="stat-value">—</strong>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Published</span>
+                                <strong id="published" class="stat-value">—</strong>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Max Resolution</span>
+                                <strong id="max-quality" class="stat-value">—</strong>
+                            </div>
+                            <div id="item-count-wrap" class="stat-item" hidden>
+                                <span class="stat-label">Playlist Items</span>
+                                <strong id="item-count" class="stat-value">—</strong>
+                            </div>
+                        </div>
+
+                        <details id="description-wrap" class="description-accordion" hidden>
+                            <summary>View Description</summary>
+                            <p id="description"></p>
+                        </details>
+                    </div>
+                </div>
+
+                <!-- Quick Download Chips -->
+                <div class="quick-actions-bar">
+                    <span class="quick-title">⚡ Quick Actions:</span>
+                    <div class="quick-chips">
+                        <button id="quick-mp3-btn" class="chip-btn chip-audio" type="button">
+                            <span>♫ Quick MP3 (320kbps)</span>
+                        </button>
+                        <button id="quick-mp4-btn" class="chip-btn chip-video" type="button">
+                            <span>▶ Quick Video (1080p MP4)</span>
+                        </button>
+                        <a id="thumbnail-download-btn" class="chip-btn chip-thumb" href="#" target="_blank" download hidden>
+                            <span>🖼️ Save HD Thumbnail</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Detailed Download Options Form -->
+                <form id="download-form" class="options-form">
+                    <div class="panel-header options-header">
+                        <h2><span class="step-badge">2</span> Custom Format & Trim Settings</h2>
+                    </div>
+
+                    <div class="format-tabs" role="tablist">
+                        <label class="tab-option">
+                            <input type="radio" name="mode" value="video" checked>
+                            <div class="tab-content">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+                                <div>
+                                    <strong>Video + Audio</strong>
+                                    <small>MP4 High Definition</small>
+                                </div>
+                            </div>
+                        </label>
+                        <label class="tab-option">
+                            <input type="radio" name="mode" value="audio">
+                            <div class="tab-content">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                                <div>
+                                    <strong>Audio Extract</strong>
+                                    <small>MP3, M4A, WAV</small>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div class="settings-grid">
+                        <div id="quality-group" class="control-group">
+                            <label for="quality">Video Quality</label>
+                            <select id="quality" name="quality"></select>
+                        </div>
+
+                        <div id="audio-format-group" class="control-group" hidden>
+                            <label for="audio-format">Audio Container</label>
+                            <select id="audio-format" name="audio_format">
+                                <option value="mp3" selected>MP3 (Universal)</option>
+                                <option value="m4a">M4A (AAC)</option>
+                                <option value="wav">WAV (Lossless)</option>
+                            </select>
+                        </div>
+
+                        <div id="audio-bitrate-group" class="control-group" hidden>
+                            <label for="audio-bitrate">Audio Bitrate</label>
+                            <select id="audio-bitrate" name="audio_bitrate">
+                                <option value="320" selected>320 kbps (High Quality)</option>
+                                <option value="192">192 kbps (Standard)</option>
+                                <option value="128">128 kbps (Compact)</option>
+                            </select>
+                        </div>
+
+                        <div class="control-group checkbox-group">
+                            <label class="custom-checkbox">
+                                <input id="playlist" type="checkbox">
+                                <span class="checkbox-box"></span>
+                                <span class="checkbox-text">
+                                    <strong>Download Full Playlist</strong>
+                                    <small>Auto-skips inaccessible/private items</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Time Trimmer Accordion -->
+                    <details class="trim-accordion">
+                        <summary>✂️ Clip / Trim Time Range (Optional)</summary>
+                        <div class="settings-grid trim-grid">
+                            <div class="control-group">
+                                <label for="start-time">Start Time (MM:SS or HH:MM:SS)</label>
+                                <input id="start-time" type="text" placeholder="e.g. 00:30">
+                            </div>
+                            <div class="control-group">
+                                <label for="end-time">End Time (MM:SS or HH:MM:SS)</label>
+                                <input id="end-time" type="text" placeholder="e.g. 02:45">
+                            </div>
+                        </div>
+                    </details>
+
+                    <div id="subtitle-row" class="settings-grid subtitle-grid" hidden>
+                        <div class="control-group checkbox-group">
+                            <label class="custom-checkbox">
+                                <input id="include-subtitles" type="checkbox">
+                                <span class="checkbox-box"></span>
+                                <span class="checkbox-text">
+                                    <strong>Download Subtitles / Captions</strong>
+                                    <small>Saves matching VTT subtitle file</small>
+                                </span>
+                            </label>
+                        </div>
+                        <div class="control-group">
+                            <label for="subtitle-language">Subtitle Language</label>
+                            <select id="subtitle-language"></select>
+                        </div>
+                    </div>
+
+                    <button id="download-button" class="btn-primary btn-large" type="submit">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        <span>Start Download</span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Progress Section -->
+            <section id="progress-section" class="panel progress-panel" aria-live="polite" hidden>
+                <div class="panel-header">
+                    <h2><span class="step-badge">3</span> Processing & Converting</h2>
+                </div>
+
+                <div class="progress-status-head">
+                    <div class="status-title">
+                        <span id="progress-spinner" class="spinner-ring"></span>
+                        <strong id="progress-message">Connecting to YouTube…</strong>
+                    </div>
+                    <span id="progress-percent" class="percent-badge">0%</span>
+                </div>
+
+                <div class="progress-bar-container">
+                    <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+                </div>
+
+                <div class="progress-metrics">
+                    <span id="progress-detail" class="metrics-text">Preparing media download…</span>
+                </div>
+
+                <!-- Finished Result Card -->
+                <div id="result" class="result-card" hidden>
+                    <div class="result-icon">✓</div>
+                    <div class="result-text">
+                        <strong id="result-title">Download Complete!</strong>
+                        <p id="result-message">Your media file has been processed and is ready to save.</p>
+                        
+                        <audio id="audio-preview" class="audio-player" controls hidden></audio>
+                    </div>
+                    <a id="download-link" class="btn-primary btn-download" href="#">Save File</a>
+                </div>
+
+                <!-- Skipped Items Failure Summary Report -->
+                <div id="failure-report" class="failure-report-box" hidden>
+                    <div class="report-header">
+                        <strong>⚠️ Skipped Items Summary (<span id="skipped-count">0</span> items)</strong>
+                        <small>These items were automatically skipped to ensure the rest of your download completes.</small>
+                    </div>
+                    <ul id="failure-list" class="failure-list"></ul>
+                </div>
+
+                <div class="progress-actions">
+                    <button id="cancel-download" class="btn-cancel" type="button" hidden>
+                        Cancel Download
+                    </button>
+                    <button id="new-download" class="btn-secondary" type="button" hidden>
+                        Convert Another Link
+                    </button>
+                </div>
+            </section>
+
+            <!-- Download History Section Drawer -->
+            <section id="history-section" class="panel history-panel" hidden>
+                <div class="panel-header history-header">
+                    <h2>Recent Downloads</h2>
+                    <button id="clear-history-btn" class="btn-ghost-sm" type="button">Clear History</button>
+                </div>
+                <div id="history-list" class="history-list">
+                    <!-- History items populated dynamically by JS -->
+                </div>
+                <p id="empty-history-msg" class="empty-msg">No downloads saved in history yet.</p>
+            </section>
+        </main>
+
+        <footer>
+            <div class="footer-content">
+                <p>MediaDrop v2.5 • High-Performance Local Media Downloader</p>
+                <p class="footer-sub">Built with Python & yt-dlp • No ads, login cookies, or server uploads.</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
