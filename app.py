@@ -19,22 +19,41 @@ DOWNLOAD_ROOT = BASE_DIR / "downloads"
 DOWNLOAD_ROOT.mkdir(exist_ok=True)
 
 ALLOWED_HOSTS = {
+    # YouTube
     "youtube.com",
     "www.youtube.com",
     "m.youtube.com",
     "music.youtube.com",
     "youtu.be",
-}
-ALLOWED_QUALITIES = {
-    "144",
-    "240",
-    "360",
-    "480",
-    "720",
-    "1080",
-    "1440",
-    "2160",
-    "best",
+    # Instagram
+    "instagram.com",
+    "www.instagram.com",
+    # TikTok
+    "tiktok.com",
+    "www.tiktok.com",
+    "vm.tiktok.com",
+    # Twitter / X
+    "twitter.com",
+    "www.twitter.com",
+    "x.com",
+    "www.x.com",
+    # Reddit
+    "reddit.com",
+    "www.reddit.com",
+    # Soundcloud
+    "soundcloud.com",
+    "www.soundcloud.com",
+    # Facebook
+    "facebook.com",
+    "www.facebook.com",
+    "fb.watch",
+    # Vimeo & Twitch & Pinterest
+    "vimeo.com",
+    "www.vimeo.com",
+    "twitch.tv",
+    "www.twitch.tv",
+    "pinterest.com",
+    "www.pinterest.com",
 }
 ALLOWED_QUALITIES = {
     "144",
@@ -252,11 +271,20 @@ def collect_finished_files(job_dir: Path) -> list[Path]:
     )
 
 
-def make_zip(job_dir: Path, files: list[Path]) -> Path:
-    zip_path = job_dir / "youtube-download.zip"
+def sanitize_folder_name(name: str | None) -> str:
+    if not name:
+        return "media-download"
+    clean = "".join(char if char.isalnum() or char in " -_()." else "_" for char in name).strip()
+    return clean[:150] or "media-download"
+
+
+def make_zip(job_dir: Path, files: list[Path], title: str | None = None) -> Path:
+    folder_name = sanitize_folder_name(title)
+    zip_path = job_dir / f"{folder_name}.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for file_path in files:
-            archive.write(file_path, arcname=file_path.relative_to(job_dir))
+            arcname = Path(folder_name) / file_path.name
+            archive.write(file_path, arcname=str(arcname))
     return zip_path
 
 
@@ -293,22 +321,26 @@ def update_progress(job_id: str, data: dict) -> None:
     info = data.get("info_dict") or {}
     index = info.get("playlist_index")
     count = info.get("playlist_count") or info.get("n_entries")
+    playlist_title = info.get("playlist_title") or info.get("playlist") or info.get("title")
     message = "Downloading media…"
 
     if index and count:
         message = f"Downloading playlist item {index} of {count}…"
         progress = ((index - 1) + (progress or 0) / 100) / count * 100
 
-    set_job(
-        job_id,
-        status="downloading",
-        progress=round(progress, 1) if progress is not None else None,
-        downloaded_bytes=downloaded,
-        total_bytes=total,
-        speed=data.get("speed"),
-        eta=data.get("eta"),
-        message=message,
-    )
+    changes = {
+        "status": "downloading",
+        "progress": round(progress, 1) if progress is not None else None,
+        "downloaded_bytes": downloaded,
+        "total_bytes": total,
+        "speed": data.get("speed"),
+        "eta": data.get("eta"),
+        "message": message,
+    }
+    if playlist_title:
+        changes["playlist_title"] = playlist_title
+
+    set_job(job_id, **changes)
 
 
 def run_download(
@@ -327,7 +359,7 @@ def run_download(
     end_time: str | None = None,
 ) -> None:
     try:
-        set_job(job_id, status="starting", message="Connecting to YouTube…")
+        set_job(job_id, status="starting", message="Connecting to media source…")
         options = build_options(
             job_dir,
             mode,
@@ -366,6 +398,7 @@ def run_download(
         files = collect_finished_files(job_dir)
         with JOBS_LOCK:
             failures = JOBS.get(job_id, {}).get("failures") or []
+            playlist_title = JOBS.get(job_id, {}).get("playlist_title")
 
         if not files:
             if failures:
@@ -374,7 +407,7 @@ def run_download(
 
         if len(files) > 1:
             set_job(job_id, status="processing", message="Creating ZIP archive…")
-            output_path = make_zip(job_dir, files)
+            output_path = make_zip(job_dir, files, title=playlist_title)
         else:
             output_path = files[0]
 

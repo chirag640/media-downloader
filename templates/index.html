@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MediaDrop — Premium YouTube & Media Downloader</title>
-    <meta name="description" content="Download YouTube videos, Shorts, Music, and Playlists in 4K MP4 or 320kbps MP3 fast and free locally.">
+    <title>MediaDrop — Universal Multi-Platform Downloader</title>
+    <meta name="description" content="Download YouTube, Instagram Reels, TikTok, Twitter/X, and Soundcloud media in 4K MP4 or 320kbps MP3 fast and free locally.">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -21,7 +21,7 @@
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </div>
                 <span class="brand-name">Media<span class="gradient-text">Drop</span></span>
-                <span class="badge-pro">PRO v2.5</span>
+                <span class="badge-pro">PRO v3.0</span>
             </div>
             <div class="nav-actions">
                 <button id="history-toggle-btn" class="nav-btn" type="button" title="Recent Downloads">
@@ -36,10 +36,10 @@
             <section class="hero-section">
                 <div class="hero-badge">
                     <span class="pulse-dot"></span>
-                    <span>Fast, Clean & Private Local Converter</span>
+                    <span>Universal Multi-Platform Downloader</span>
                 </div>
-                <h1>Download Any YouTube Video <br><span class="gradient-text">In 4K & High-Quality MP3</span></h1>
-                <p class="hero-subtitle">Paste links or type search keywords to convert and save instantly with zero ads, tracking, or restrictions.</p>
+                <h1>Download Video & Audio <br><span class="gradient-text">From Any Social Platform</span></h1>
+                <p class="hero-subtitle">Convert YouTube, Instagram Reels, TikTok, Twitter/X & Soundcloud into 4K MP4 or 320kbps MP3 instantly.</p>
             </section>
 
             <!-- Search Panel -->
@@ -54,7 +54,7 @@
                                 id="url"
                                 name="url"
                                 type="text"
-                                placeholder="Paste YouTube link OR type search keywords (e.g. lofi hip hop)..."
+                                placeholder="Paste link (YouTube, Instagram, TikTok, Twitter, Soundcloud) or search keywords..."
                                 autocomplete="off"
                                 required
                                 autofocus
@@ -74,11 +74,12 @@
                     </div>
                     
                     <div class="feature-pills">
-                        <span class="pill"><span class="pill-check">✓</span> YouTube Search</span>
-                        <span class="pill"><span class="pill-check">✓</span> Auto-Skip Private Videos</span>
-                        <span class="pill"><span class="pill-check">✓</span> 4K Ultra HD</span>
-                        <span class="pill"><span class="pill-check">✓</span> 320kbps MP3</span>
-                        <span class="pill"><span class="pill-check">✓</span> Time Trimmer</span>
+                        <span class="pill platform-pill pill-yt"><span class="pill-dot"></span> YouTube</span>
+                        <span class="pill platform-pill pill-ig"><span class="pill-dot"></span> Instagram Reels</span>
+                        <span class="pill platform-pill pill-tt"><span class="pill-dot"></span> TikTok</span>
+                        <span class="pill platform-pill pill-tw"><span class="pill-dot"></span> Twitter / X</span>
+                        <span class="pill platform-pill pill-sc"><span class="pill-dot"></span> Soundcloud</span>
+                        <span class="pill"><span class="pill-check">✓</span> Named Playlist Folders</span>
                     </div>
                 </form>
 
@@ -151,7 +152,7 @@
                             <span>▶ Quick Video (1080p MP4)</span>
                         </button>
                         <a id="thumbnail-download-btn" class="chip-btn chip-thumb" href="#" target="_blank" download hidden>
-                            <span>🖼️ Save HD Thumbnail</span>
+                            <span>🖼️ Save Cover Photo</span>
                         </a>
                     </div>
                 </div>
@@ -179,7 +180,7 @@
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
                                 <div>
                                     <strong>Audio Extract</strong>
-                                    <small>MP3, M4A, WAV</small>
+                                    <small>MP3 with ID3 Cover Art</small>
                                 </div>
                             </div>
                         </label>
@@ -194,7 +195,7 @@
                         <div id="audio-format-group" class="control-group" hidden>
                             <label for="audio-format">Audio Container</label>
                             <select id="audio-format" name="audio_format">
-                                <option value="mp3" selected>MP3 (Universal)</option>
+                                <option value="mp3" selected>MP3 (Universal + ID3 Art)</option>
                                 <option value="m4a">M4A (AAC)</option>
                                 <option value="wav">WAV (Lossless)</option>
                             </select>
@@ -215,7 +216,7 @@
                                 <span class="checkbox-box"></span>
                                 <span class="checkbox-text">
                                     <strong>Download Full Playlist</strong>
-                                    <small>Auto-skips inaccessible/private items</small>
+                                    <small>Organized into Playlist Title folder</small>
                                 </span>
                             </label>
                         </div>
@@ -269,7 +270,7 @@
                 <div class="progress-status-head">
                     <div class="status-title">
                         <span id="progress-spinner" class="spinner-ring"></span>
-                        <strong id="progress-message">Connecting to YouTube…</strong>
+                        <strong id="progress-message">Connecting to media source…</strong>
                     </div>
                     <span id="progress-percent" class="percent-badge">0%</span>
                 </div>
@@ -328,8 +329,8 @@
 
         <footer>
             <div class="footer-content">
-                <p>MediaDrop v2.5 • High-Performance Local Media Downloader</p>
-                <p class="footer-sub">Built with Python & yt-dlp • No ads, login cookies, or server uploads.</p>
+                <p>MediaDrop v3.0 • Universal Multi-Platform Downloader</p>
+                <p class="footer-sub">YouTube • Instagram • TikTok • Twitter/X • Soundcloud • Reddit • Facebook</p>
             </div>
         </footer>
     </div>

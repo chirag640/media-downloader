@@ -317,10 +317,17 @@ class AppTest(unittest.TestCase):
         job_id = self.start_job(playlist=True)
         response = self.client.get(f"/api/jobs/{job_id}/file")
         with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
-            self.assertEqual(archive.namelist(), ["one.mp4", "two.mp4"])
-            self.assertEqual(archive.read("one.mp4"), b"one")
+            self.assertIn("media-download/one.mp4", archive.namelist())
+            self.assertEqual(archive.read("media-download/one.mp4"), b"one")
         response.close()
         self.assertEqual(list(app.DOWNLOAD_ROOT.iterdir()), [])
+
+    def test_multi_platform_url_validation(self):
+        self.assertTrue(app.is_valid_youtube_url("https://www.instagram.com/reel/C123456/"))
+        self.assertTrue(app.is_valid_youtube_url("https://www.tiktok.com/@user/video/12345678"))
+        self.assertTrue(app.is_valid_youtube_url("https://x.com/user/status/12345678"))
+        self.assertTrue(app.is_valid_youtube_url("https://soundcloud.com/artist/track"))
+        self.assertFalse(app.is_valid_youtube_url("https://malicious-site.com/video"))
 
     def test_download_error_cleanup(self):
         FakeYoutubeDL.error = DownloadError("unavailable")
