@@ -64,6 +64,285 @@ body {
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* 2-Column Split Studio Workspace Grid */
+.studio-workspace-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+}
+
+@media (min-width: 768px) {
+    .studio-workspace-grid {
+        grid-template-columns: 1fr 1.2fr;
+    }
+}
+
+.left-studio-column, .right-studio-column {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Resolution Cards Selection Grid */
+.resolution-cards-wrapper {
+    margin-bottom: 16px;
+}
+
+.resolution-card-title {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 8px;
+}
+
+.resolution-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.res-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-glass);
+    background: rgba(0, 0, 0, 0.04);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.res-card:hover {
+    border-color: var(--border-glass-hover);
+    background: var(--surface-card-hover);
+}
+
+.res-card.active {
+    border-color: var(--accent-indigo);
+    background: rgba(99, 102, 241, 0.15);
+    box-shadow: 0 0 14px rgba(99, 102, 241, 0.25);
+}
+
+.res-card-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.res-icon {
+    font-size: 14px;
+}
+
+.res-label {
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.res-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+    font-size: 9px;
+    font-weight: 800;
+}
+
+/* Shimmer Skeleton Loading */
+.skeleton-card {
+    padding: 20px;
+}
+
+.skeleton-grid {
+    display: flex;
+    gap: 16px;
+}
+
+.skeleton-thumb {
+    width: 140px;
+    height: 80px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+
+.skeleton-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    justify-content: center;
+}
+
+.skeleton-line {
+    height: 14px;
+    border-radius: 4px;
+}
+
+.skeleton-line.short { width: 30%; }
+.skeleton-line.long { width: 90%; }
+.skeleton-line.medium { width: 60%; }
+
+.shimmer {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 25%, rgba(255, 255, 255, 0.09) 50%, rgba(255, 255, 255, 0.03) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* Step-by-Step Conversion Pipeline Checklist */
+.pipeline-checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 16px 0;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.04);
+    border: 1px solid var(--border-glass);
+}
+
+.step-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: all 0.3s ease;
+}
+
+.step-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: all 0.3s ease;
+}
+
+.step-item.active {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.step-item.active .step-dot {
+    background: var(--accent-indigo);
+    box-shadow: 0 0 10px var(--accent-indigo);
+    animation: pulseStep 1.2s infinite alternate;
+}
+
+.step-item.done {
+    color: var(--success);
+}
+
+.step-item.done .step-dot {
+    background: var(--success);
+    box-shadow: 0 0 6px var(--success);
+}
+
+@keyframes pulseStep {
+    0% { transform: scale(0.9); opacity: 0.6; }
+    100% { transform: scale(1.3); opacity: 1; }
+}
+
+/* Modals */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 11000;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(12px);
+    display: grid;
+    place-items: center;
+    padding: 20px;
+}
+
+.modal-card {
+    width: min(100%, 420px);
+    border-radius: var(--radius-lg);
+    background: var(--surface-card-hover);
+    border: 1px solid var(--border-glass-hover);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    padding: 20px;
+}
+
+.modal-large {
+    width: min(100%, 640px);
+}
+
+.modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.modal-head h4 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.qr-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    text-align: center;
+}
+
+.qr-box {
+    width: 180px;
+    height: 180px;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    background: white;
+    display: grid;
+    place-items: center;
+}
+
+.qr-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.transcript-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.transcript-body textarea {
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.transcript-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/* Bookmarklet pill */
+.bookmarklet-pill {
+    background: rgba(99, 102, 241, 0.12) !important;
+    border-color: rgba(99, 102, 241, 0.3) !important;
+    color: #818cf8 !important;
+    text-decoration: none;
+    font-size: 12px;
+}
+
+.bookmarklet-pill:hover {
+    background: rgba(99, 102, 241, 0.25) !important;
+}
+
 /* Drag and drop overlay */
 .dropzone-overlay {
     position: fixed;
@@ -112,7 +391,7 @@ body {
     100% { transform: scale(1.02); border-color: var(--accent-purple); }
 }
 
-/* Subtle background mesh */
+/* Background mesh */
 .background-mesh {
     position: fixed;
     top: 0;
@@ -676,19 +955,13 @@ textarea:focus {
 
 /* Media Body */
 .media-body {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 16px;
     padding: 16px;
     border-radius: var(--radius-md);
     background: rgba(0, 0, 0, 0.05);
     border: 1px solid var(--border-glass);
-}
-
-@media (min-width: 640px) {
-    .media-body {
-        grid-template-columns: minmax(220px, 300px) 1fr;
-    }
 }
 
 .thumb-box {
@@ -780,13 +1053,6 @@ textarea:focus {
     border-top: 1px solid var(--border-glass);
 }
 
-@media (min-width: 640px) {
-    .quick-chip-row {
-        flex-direction: row;
-        align-items: center;
-    }
-}
-
 .chip-label {
     font-size: 12px;
     font-weight: 700;
@@ -819,11 +1085,12 @@ textarea:focus {
 
 .chip-audio:hover { background: rgba(168, 85, 247, 0.15); border-color: var(--accent-purple); color: #c084fc; }
 .chip-video:hover { background: rgba(99, 102, 241, 0.15); border-color: var(--accent-indigo); color: #818cf8; }
+.chip-sub:hover { background: rgba(16, 185, 129, 0.15); border-color: var(--success); color: #34d399; }
 .chip-thumb:hover { background: rgba(236, 72, 153, 0.15); border-color: var(--accent-pink); color: #f472b6; }
 
 /* Segmented Control Radio Tabs */
 .options-body {
-    margin-top: 24px;
+    margin-top: 0;
 }
 
 .segmented-control {
@@ -831,6 +1098,10 @@ textarea:focus {
     grid-template-columns: 1fr 1fr;
     gap: 10px;
     margin-bottom: 18px;
+}
+
+.three-tabs {
+    grid-template-columns: 1fr 1fr 1fr;
 }
 
 .segment-option input {
@@ -844,12 +1115,12 @@ textarea:focus {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 48px;
+    height: 44px;
     border-radius: var(--radius-md);
     border: 1px solid var(--border-glass);
     background: rgba(0, 0, 0, 0.04);
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -866,12 +1137,6 @@ textarea:focus {
     display: grid;
     grid-template-columns: 1fr;
     gap: 14px;
-}
-
-@media (min-width: 640px) {
-    .controls-grid {
-        grid-template-columns: 1fr 1fr;
-    }
 }
 
 .ctrl-cell {
@@ -1060,6 +1325,11 @@ select:focus, .trim-inputs input:focus {
 .result-details p {
     font-size: 12px;
     color: var(--text-secondary);
+}
+
+.result-buttons {
+    display: flex;
+    gap: 8px;
 }
 
 /* Equalizer Player */

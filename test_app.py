@@ -348,6 +348,16 @@ class AppTest(unittest.TestCase):
         self.assertEqual(clean_res.status_code, 200)
         self.assertIn("cleaned_items", clean_res.get_json())
 
+    def test_gif_mode_and_transcript(self):
+        opts = app.build_options(app.DOWNLOAD_ROOT, "gif", "best", False)
+        self.assertEqual(opts["format"], "bestvideo[height<=720]/best")
+
+        transcript_res = self.post_json(
+            "/api/transcript",
+            {"url": "https://invalid-host.com/video"},
+        )
+        self.assertEqual(transcript_res.status_code, 400)
+
     def test_download_error_cleanup(self):
         FakeYoutubeDL.error = DownloadError("unavailable")
         job_id = self.start_job()

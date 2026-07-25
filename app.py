@@ -176,6 +176,7 @@ def build_options(
     start_time: str | None = None,
     end_time: str | None = None,
     normalize_audio: bool = False,
+    audio_effect: str = "none",
 ) -> dict:
     output_template = str(
         job_dir / "%(playlist_index&{} - |)s%(title).150B [%(id)s].%(ext)s"
@@ -232,6 +233,26 @@ def build_options(
             }
         )
 
+    if mode == "gif":
+        options.update(
+            {
+                "format": "bestvideo[height<=720]/best",
+                "postprocessors": [
+                    {
+                        "key": "FFmpegVideoConvertor",
+                        "preferedformat": "gif",
+                    }
+                ],
+                "postprocessor_args": {
+                    "FFmpegVideoConvertor": [
+                        "-vf",
+                        "fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                    ]
+                },
+            }
+        )
+        return options
+
     if mode == "audio":
         codec = audio_format if audio_format in ALLOWED_AUDIO_FORMATS else "mp3"
         bitrate = audio_bitrate if audio_bitrate in ALLOWED_BITRATES else "192"
@@ -242,8 +263,16 @@ def build_options(
                 "preferredquality": bitrate,
             }
         ]
+        args = []
         if normalize_audio:
-            options["postprocessor_args"] = {"FFmpegExtractAudio": ["-af", "loudnorm"]}
+            args.extend(["-af", "loudnorm"])
+        if audio_effect == "nightcore":
+            args.extend(["-af", "asetrate=44100*1.25,aresample=44100"])
+        elif audio_effect == "slowed":
+            args.extend(["-af", "asetrate=44100*0.85,aresample=44100"])
+
+        if args:
+            options["postprocessor_args"] = {"FFmpegExtractAudio": args}
 
         options.update(
             {
@@ -328,10 +357,14 @@ def update_progress(job_id: str, data: dict) -> None:
     count = info.get("playlist_count") or info.get("n_entries")
     playlist_title = info.get("playlist_title") or info.get("playlist") or info.get("title")
     message = "Downloading media…"
+    stage = "downloading"
 
     if index and count:
         message = f"Downloading playlist item {index} of {count}…"
         progress = ((index - 1) + (progress or 0) / 100) / count * 100
+    
+    if progress and progress >= 95:
+        stage = "encoding"
 
     changes = {
         "status": "downloading",
@@ -341,6 +374,7 @@ def update_progress(job_id: str, data: dict) -> None:
         "speed": data.get("speed"),
         "eta": data.get("eta"),
         "message": message,
+        "stage": stage,
     }
     if playlist_title:
         changes["playlist_title"] = playlist_title
@@ -362,9 +396,11 @@ def run_download(
     audio_format: str = "mp3",
     start_time: str | None = None,
     end_time: str | None = None,
+    normalize_audio: bool = False,
+    audio_effect: str = "none",
 ) -> None:
     try:
-        set_job(job_id, status="starting", message="Connecting to media source…")
+        set_job(job_id, status="starting", stage="connecting", message="Connecting to media source…")
         options = build_options(
             job_dir,
             mode,
@@ -378,6 +414,8 @@ def run_download(
             job_id=job_id,
             start_time=start_time,
             end_time=end_time,
+            normalize_audio=normalize_audio,
+            audio_effect=audio_effect,
         )
         options["progress_hooks"] = [lambda data: update_progress(job_id, data)]
 
@@ -387,6 +425,7 @@ def run_download(
                 set_job(
                     job_id,
                     status="processing",
+                    stage="encoding",
                     message=(
                         f"Extracting and converting audio to {audio_format.upper()}…"
                         if mode == "audio"
@@ -411,22 +450,19 @@ def run_download(
             raise RuntimeError("No downloadable file was produced.")
 
         if len(files) > 1:
-            set_job(job_id, status="processing", message="Creating ZIP archive…")
+            set_job(job_id, status="processing", stage="packaging", message="Creating ZIP archive…")
             output_path = make_zip(job_dir, files, title=playlist_title)
         else:
             output_path = files[0]
 
-        msg = "Your file is ready."
-        if failures:
-            msg = f"Completed. {len(files)} items downloaded, {len(failures)} skipped."
-
         set_job(
             job_id,
             status="ready",
+            stage="ready",
             progress=100,
             filename=output_path.name,
             path=output_path,
-            message=msg,
+            message="Media ready to download.",
             success_count=len(files),
             failed_count=len(failures),
             failures=failures,
@@ -436,29 +472,22 @@ def run_download(
         set_job(
             job_id,
             status="canceled",
+            stage="canceled",
             message="Download canceled.",
             progress=0,
         )
     except Exception as exc:
         shutil.rmtree(job_dir, ignore_errors=True)
         with JOBS_LOCK:
-            canceled = bool(JOBS.get(job_id, {}).get("cancel_requested"))
             failures = JOBS.get(job_id, {}).get("failures") or []
-        if canceled:
-            set_job(
-                job_id,
-                status="canceled",
-                message="Download canceled.",
-                progress=0,
-            )
-        else:
-            set_job(
-                job_id,
-                status="error",
-                message="Download failed.",
-                error=friendly_error(exc),
-                failures=failures,
-            )
+        set_job(
+            job_id,
+            status="error",
+            stage="error",
+            message="Download failed.",
+            error=friendly_error(exc),
+            failures=failures,
+        )
 
 
 def video_details(info: dict) -> dict:
@@ -485,6 +514,35 @@ def video_details(info: dict) -> dict:
     if not heights:
         heights = [1080, 720, 360]
 
+    extractor = (info.get("extractor") or media.get("extractor") or "").lower()
+    if "instagram" in extractor:
+        platform = "instagram"
+    elif "tiktok" in extractor:
+        platform = "tiktok"
+    elif "twitter" in extractor or "x" in extractor:
+        platform = "twitter"
+    elif "soundcloud" in extractor:
+        platform = "soundcloud"
+    elif "reddit" in extractor:
+        platform = "reddit"
+    elif "facebook" in extractor:
+        platform = "facebook"
+    else:
+        platform = "youtube"
+
+    resolution_cards = []
+    for h in heights:
+        if h >= 2160:
+            resolution_cards.append({"quality": str(h), "label": "4K Ultra HD", "badge": "PRO 4K", "icon": "⚡"})
+        elif h >= 1080:
+            resolution_cards.append({"quality": str(h), "label": "1080p Full HD", "badge": "POPULAR", "icon": "▶"})
+        elif h >= 720:
+            resolution_cards.append({"quality": str(h), "label": "720p HD", "badge": "FAST", "icon": "🎬"})
+        else:
+            resolution_cards.append({"quality": str(h), "label": f"{h}p Standard", "badge": "COMPACT", "icon": "📱"})
+
+    resolution_cards.append({"quality": "mp3-320", "label": "320k MP3 Audio", "badge": "AUDIO", "icon": "♫", "is_audio": True})
+
     return {
         "id": media.get("id") or info.get("id"),
         "title": info.get("title") or media.get("title") or "Untitled media",
@@ -503,7 +561,9 @@ def video_details(info: dict) -> dict:
         "live_status": media.get("live_status"),
         "is_playlist": is_playlist,
         "item_count": info.get("playlist_count") or len(entries) if is_playlist else None,
+        "platform": platform,
         "qualities": [str(height) for height in heights],
+        "resolution_cards": resolution_cards,
         "audio_bitrates": ["320", "192", "128"],
         "audio_formats": ["mp3", "m4a", "wav"],
         "subtitle_languages": subtitle_languages,
@@ -581,11 +641,13 @@ def start_download():
     download_playlist = data.get("playlist") is True
     include_subtitles = data.get("subtitles") is True
     subtitle_language = str(data.get("subtitle_language") or "").strip()
+    normalize_audio = data.get("normalize_audio") is True
+    audio_effect = str(data.get("audio_effect") or "none")
 
     if not is_valid_youtube_url(url):
         return jsonify(error="Enter a valid YouTube or YouTube Music URL."), 400
 
-    if mode not in {"video", "audio"}:
+    if mode not in {"video", "audio", "gif"}:
         return jsonify(error="Invalid download type."), 400
 
     if quality not in ALLOWED_QUALITIES:
@@ -629,10 +691,57 @@ def start_download():
             audio_format,
             start_time,
             end_time,
+            normalize_audio,
+            audio_effect,
         ),
         daemon=True,
     ).start()
     return jsonify(job_id=job_id), 202
+
+
+@app.post("/api/transcript")
+def fetch_transcript():
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url", "")).strip()
+    if not is_valid_youtube_url(url):
+        return jsonify(error="Provide a valid media URL for transcript extraction."), 400
+
+    try:
+        options = {
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": ["en", "auto"],
+            "quiet": True,
+        }
+        with yt_dlp.YoutubeDL(options) as downloader:
+            info = downloader.extract_info(url, download=False)
+
+        subtitles = info.get("subtitles") or info.get("automatic_captions") or {}
+        if not subtitles:
+            return jsonify(error="No transcript or captions found for this media."), 404
+
+        lang = "en" if "en" in subtitles else list(subtitles.keys())[0]
+        caption_url = subtitles[lang][0].get("url")
+        if not caption_url:
+            return jsonify(error="Could not retrieve transcript URL."), 404
+
+        req = Request(caption_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(req, timeout=15) as source:
+            raw = source.read().decode("utf-8", errors="ignore")
+
+        lines = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or "-->" in line or line.startswith("WEBVTT") or line.startswith("<"):
+                continue
+            if line not in lines:
+                lines.append(line)
+
+        transcript_text = "\n".join(lines[:200]) or "Transcript not available."
+        return jsonify(title=info.get("title"), transcript=transcript_text)
+    except Exception as exc:
+        return jsonify(error=f"Transcript extraction failed: {friendly_error(exc)}"), 500
 
 
 def run_batch_download(

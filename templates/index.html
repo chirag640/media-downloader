@@ -3,8 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MediaDrop — Professional Universal Downloader</title>
-    <meta name="description" content="Universal high-speed downloader for YouTube, Instagram Reels, TikTok, Twitter/X, and Soundcloud.">
+    <title>MediaDrop — Free 4K Media Downloader & Converter</title>
+    <meta name="description" content="Universal high-speed free downloader for YouTube, Instagram Reels, TikTok, Twitter/X, and Soundcloud.">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -25,6 +25,36 @@
         </div>
     </div>
 
+    <!-- QR Code Modal -->
+    <div id="qr-modal" class="modal-overlay" hidden>
+        <div class="modal-card">
+            <div class="modal-head">
+                <h4>📱 Scan to Download on Mobile</h4>
+                <button id="close-qr-btn" class="btn-clear" type="button">✕</button>
+            </div>
+            <div class="qr-body">
+                <div id="qr-code-container" class="qr-box"></div>
+                <p class="qr-hint">Scan with your iPhone or Android camera to save file directly to your phone.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Transcript Modal -->
+    <div id="transcript-modal" class="modal-overlay" hidden>
+        <div class="modal-card modal-large">
+            <div class="modal-head">
+                <h4>📝 AI Transcript & Captions</h4>
+                <button id="close-transcript-btn" class="btn-clear" type="button">✕</button>
+            </div>
+            <div class="transcript-body">
+                <textarea id="transcript-textarea" readonly rows="12" placeholder="Extracting transcript..."></textarea>
+                <div class="transcript-actions">
+                    <button id="copy-transcript-btn" class="btn-primary" type="button">Copy to Clipboard (AI Prompt)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="app-shell">
         <header class="top-nav">
             <div class="nav-brand">
@@ -32,7 +62,7 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </div>
                 <span class="brand-title">MediaDrop</span>
-                <span id="health-status-badge" class="brand-badge badge-green">🟢 Engine Online</span>
+                <span id="health-status-badge" class="brand-badge badge-green">🟢 100% Free & Unlimited</span>
             </div>
 
             <div class="nav-center-hint">
@@ -41,6 +71,9 @@
             </div>
 
             <div class="nav-controls">
+                <a id="bookmarklet-btn" class="btn-subtle bookmarklet-pill" href="javascript:(function(){window.open('http://127.0.0.1:5000/?url='+encodeURIComponent(location.href));})();" title="Drag this button to your Bookmarks Bar for 1-click downloads">
+                    <span>⚡ Bookmarks Tool</span>
+                </a>
                 <button id="theme-toggle-btn" class="btn-subtle" type="button" title="Toggle Light/Dark Theme">
                     <span id="theme-icon">🌙</span>
                     <span id="theme-label">Dark</span>
@@ -57,10 +90,10 @@
             <section class="hero-block">
                 <div class="status-pill">
                     <span class="indicator-dot"></span>
-                    <span id="ffmpeg-status-txt">FFmpeg Ready • High-Speed Conversion</span>
+                    <span id="ffmpeg-status-txt">FFmpeg Ready • 10x Fast Fragment Engine</span>
                 </div>
-                <h1>Universal Downloader <br><span class="gradient-headline">Built for Speed & Precision</span></h1>
-                <p class="hero-desc">Convert and save 4K video, Reels, audio tracks & playlists from YouTube, Instagram, TikTok, Twitter/X, and Soundcloud.</p>
+                <h1>Universal Downloader <br><span class="gradient-headline">100% Free Media Studio</span></h1>
+                <p class="hero-desc">Convert and save 4K video, Reels, audio tracks & playlists from YouTube, Instagram, TikTok, Twitter/X, and Soundcloud for free.</p>
             </section>
 
             <!-- Main Input Panel -->
@@ -132,6 +165,18 @@
                 </div>
             </section>
 
+            <!-- Shimmer Skeleton Loading Card -->
+            <section id="skeleton-loader" class="card skeleton-card" hidden>
+                <div class="skeleton-grid">
+                    <div class="skeleton-thumb shimmer"></div>
+                    <div class="skeleton-lines">
+                        <div class="skeleton-line shimmer short"></div>
+                        <div class="skeleton-line shimmer long"></div>
+                        <div class="skeleton-line shimmer medium"></div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Search Results Container -->
             <section id="search-results-section" class="card search-results-card" hidden>
                 <div class="card-head">
@@ -141,176 +186,205 @@
                 <div id="search-results-grid" class="results-grid"></div>
             </section>
 
-            <!-- Single Media Details Card -->
+            <!-- Single Media 2-Column Split Studio Workspace Card -->
             <section id="preview-section" class="card preview-card" hidden>
                 <div class="card-head">
-                    <h3><span class="step-num">1</span> Media Summary</h3>
+                    <h3><span class="step-num">1</span> Media Studio Workspace</h3>
                     <span id="media-type-badge" class="badge-type">Video</span>
                 </div>
 
-                <div class="media-body">
-                    <div class="thumb-box">
-                        <img id="thumbnail" alt="Thumbnail preview">
-                        <span id="duration-badge" class="duration-tag">0:00</span>
-                    </div>
-
-                    <div class="media-details">
-                        <span id="uploader" class="channel-tag">Channel Name</span>
-                        <h4 id="title" class="video-title">Media Title</h4>
-
-                        <div class="meta-grid">
-                            <div class="meta-item">
-                                <span class="meta-lbl">Views</span>
-                                <strong id="views" class="meta-val">—</strong>
-                            </div>
-                            <div class="meta-item">
-                                <span class="meta-lbl">Published</span>
-                                <strong id="published" class="meta-val">—</strong>
-                            </div>
-                            <div class="meta-item">
-                                <span class="meta-lbl">Max Quality</span>
-                                <strong id="max-quality" class="meta-val">—</strong>
-                            </div>
-                            <div id="item-count-wrap" class="meta-item" hidden>
-                                <span class="meta-lbl">Playlist Count</span>
-                                <strong id="item-count" class="meta-val">—</strong>
-                            </div>
+                <div class="studio-workspace-grid">
+                    <!-- Left Column: Media Preview & Meta -->
+                    <div class="left-studio-column">
+                        <div class="thumb-box">
+                            <img id="thumbnail" alt="Thumbnail preview">
+                            <span id="duration-badge" class="duration-tag">0:00</span>
                         </div>
 
-                        <details id="description-wrap" class="desc-box" hidden>
-                            <summary>Description</summary>
-                            <p id="description"></p>
-                        </details>
+                        <div class="media-details">
+                            <span id="uploader" class="channel-tag">Channel Name</span>
+                            <h4 id="title" class="video-title">Media Title</h4>
+
+                            <div class="meta-grid">
+                                <div class="meta-item">
+                                    <span class="meta-lbl">Views</span>
+                                    <strong id="views" class="meta-val">—</strong>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="meta-lbl">Published</span>
+                                    <strong id="published" class="meta-val">—</strong>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="meta-lbl">Max Quality</span>
+                                    <strong id="max-quality" class="meta-val">—</strong>
+                                </div>
+                                <div id="item-count-wrap" class="meta-item" hidden>
+                                    <span class="meta-lbl">Playlist Count</span>
+                                    <strong id="item-count" class="meta-val">—</strong>
+                                </div>
+                            </div>
+
+                            <details id="description-wrap" class="desc-box" hidden>
+                                <summary>Description</summary>
+                                <p id="description"></p>
+                            </details>
+                        </div>
+
+                        <!-- Quick Action Chips -->
+                        <div class="quick-chip-row">
+                            <span class="chip-label">⚡ Quick Presets:</span>
+                            <div class="chips-flex">
+                                <button id="quick-mp3-btn" class="chip chip-audio" type="button">♫ Quick MP3 (320k)</button>
+                                <button id="quick-mp4-btn" class="chip chip-video" type="button">▶ Quick 1080p MP4</button>
+                                <button id="open-transcript-btn" class="chip chip-sub" type="button">📝 Copy AI Transcript</button>
+                                <a id="thumbnail-download-btn" class="chip chip-thumb" href="#" target="_blank" download hidden>🖼️ Save Cover Photo</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Resolution Cards Grid & Download Controls -->
+                    <div class="right-studio-column">
+                        <form id="download-form" class="options-body">
+                            <div class="card-head options-head">
+                                <h3><span class="step-num">2</span> Format & Resolution Cards</h3>
+                            </div>
+
+                            <!-- Segmented Format Control (Video / Audio / GIF) -->
+                            <div class="segmented-control three-tabs" role="tablist">
+                                <label class="segment-option">
+                                    <input type="radio" name="mode" value="video" checked>
+                                    <div class="segment-pill">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
+                                        <span>Video (MP4)</span>
+                                    </div>
+                                </label>
+                                <label class="segment-option">
+                                    <input type="radio" name="mode" value="audio">
+                                    <div class="segment-pill">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                                        <span>Audio (MP3)</span>
+                                    </div>
+                                </label>
+                                <label class="segment-option">
+                                    <input type="radio" name="mode" value="gif">
+                                    <div class="segment-pill">
+                                        <span>🖼️ GIF Meme</span>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <!-- Resolution Cards Selection Grid -->
+                            <div id="resolution-cards-wrapper" class="resolution-cards-wrapper">
+                                <label class="resolution-card-title">Select Quality Preset:</label>
+                                <div id="resolution-grid" class="resolution-grid">
+                                    <!-- Populated dynamically by JS -->
+                                </div>
+                            </div>
+
+                            <div class="controls-grid">
+                                <div id="quality-group" class="ctrl-cell" hidden>
+                                    <label for="quality">Video Quality</label>
+                                    <select id="quality" name="quality"></select>
+                                </div>
+
+                                <div id="audio-format-group" class="ctrl-cell" hidden>
+                                    <label for="audio-format">Audio Container</label>
+                                    <select id="audio-format" name="audio_format">
+                                        <option value="mp3" selected>MP3 (Universal + ID3 Art)</option>
+                                        <option value="m4a">M4A (AAC)</option>
+                                        <option value="wav">WAV (Lossless)</option>
+                                    </select>
+                                </div>
+
+                                <div id="audio-bitrate-group" class="ctrl-cell" hidden>
+                                    <label for="audio-bitrate">Audio Bitrate</label>
+                                    <select id="audio-bitrate" name="audio_bitrate">
+                                        <option value="320" selected>320 kbps (High Quality)</option>
+                                        <option value="192">192 kbps (Standard)</option>
+                                        <option value="128">128 kbps (Compact)</option>
+                                    </select>
+                                </div>
+
+                                <div id="audio-effect-group" class="ctrl-cell" hidden>
+                                    <label for="audio-effect">Audio Effect Studio</label>
+                                    <select id="audio-effect" name="audio_effect">
+                                        <option value="none" selected>Standard (Original Pitch)</option>
+                                        <option value="nightcore">⚡ Nightcore (1.25x Fast + High Pitch)</option>
+                                        <option value="slowed">🌙 Slowed + Reverb (0.85x Slow + Low Pitch)</option>
+                                    </select>
+                                </div>
+
+                                <div class="ctrl-cell check-cell">
+                                    <label class="check-box-label">
+                                        <input id="playlist" type="checkbox">
+                                        <span class="check-indicator"></span>
+                                        <div>
+                                            <strong>Full Playlist</strong>
+                                            <small>Bundled into Playlist Title folder</small>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Audio Volume Normalization Option -->
+                            <div id="normalize-row" class="controls-grid sub-grid" hidden>
+                                <div class="ctrl-cell check-cell">
+                                    <label class="check-box-label">
+                                        <input id="normalize-audio" type="checkbox">
+                                        <span class="check-indicator"></span>
+                                        <div>
+                                            <strong>Loudness Normalization (FFmpeg)</strong>
+                                            <small>Equalize audio volume levels</small>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Time Trimmer Accordion -->
+                            <details class="trim-box">
+                                <summary>✂️ Clip Time Range (Optional)</summary>
+                                <div class="controls-grid trim-inputs">
+                                    <div class="ctrl-cell">
+                                        <label for="start-time">Start Time</label>
+                                        <input id="start-time" type="text" placeholder="00:30">
+                                    </div>
+                                    <div class="ctrl-cell">
+                                        <label for="end-time">End Time</label>
+                                        <input id="end-time" type="text" placeholder="02:45">
+                                    </div>
+                                </div>
+                            </details>
+
+                            <div id="subtitle-row" class="controls-grid sub-grid" hidden>
+                                <div class="ctrl-cell check-cell">
+                                    <label class="check-box-label">
+                                        <input id="include-subtitles" type="checkbox">
+                                        <span class="check-indicator"></span>
+                                        <div>
+                                            <strong>Include Subtitles</strong>
+                                            <small>Saves matching VTT file</small>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div class="ctrl-cell">
+                                    <label for="subtitle-language">Caption Language</label>
+                                    <select id="subtitle-language"></select>
+                                </div>
+                            </div>
+
+                            <button id="download-button" class="btn-primary btn-large" type="submit">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                <span>Start Conversion</span>
+                            </button>
+                        </form>
                     </div>
                 </div>
-
-                <!-- Quick Action Chips -->
-                <div class="quick-chip-row">
-                    <span class="chip-label">⚡ Quick Presets:</span>
-                    <div class="chips-flex">
-                        <button id="quick-mp3-btn" class="chip chip-audio" type="button">♫ Quick MP3 (320k)</button>
-                        <button id="quick-mp4-btn" class="chip chip-video" type="button">▶ Quick 1080p MP4</button>
-                        <a id="thumbnail-download-btn" class="chip chip-thumb" href="#" target="_blank" download hidden>🖼️ Save Cover Photo</a>
-                    </div>
-                </div>
-
-                <!-- Custom Options Form -->
-                <form id="download-form" class="options-body">
-                    <div class="card-head options-head">
-                        <h3><span class="step-num">2</span> Format & Clip Options</h3>
-                    </div>
-
-                    <!-- Segmented Format Control -->
-                    <div class="segmented-control" role="tablist">
-                        <label class="segment-option">
-                            <input type="radio" name="mode" value="video" checked>
-                            <div class="segment-pill">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>
-                                <span>Video (MP4)</span>
-                            </div>
-                        </label>
-                        <label class="segment-option">
-                            <input type="radio" name="mode" value="audio">
-                            <div class="segment-pill">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-                                <span>Audio (MP3 / Metadata)</span>
-                            </div>
-                        </label>
-                    </div>
-
-                    <div class="controls-grid">
-                        <div id="quality-group" class="ctrl-cell">
-                            <label for="quality">Video Quality</label>
-                            <select id="quality" name="quality"></select>
-                        </div>
-
-                        <div id="audio-format-group" class="ctrl-cell" hidden>
-                            <label for="audio-format">Audio Container</label>
-                            <select id="audio-format" name="audio_format">
-                                <option value="mp3" selected>MP3 (Universal + ID3 Art)</option>
-                                <option value="m4a">M4A (AAC)</option>
-                                <option value="wav">WAV (Lossless)</option>
-                            </select>
-                        </div>
-
-                        <div id="audio-bitrate-group" class="ctrl-cell" hidden>
-                            <label for="audio-bitrate">Audio Bitrate</label>
-                            <select id="audio-bitrate" name="audio_bitrate">
-                                <option value="320" selected>320 kbps (High Quality)</option>
-                                <option value="192">192 kbps (Standard)</option>
-                                <option value="128">128 kbps (Compact)</option>
-                            </select>
-                        </div>
-
-                        <div class="ctrl-cell check-cell">
-                            <label class="check-box-label">
-                                <input id="playlist" type="checkbox">
-                                <span class="check-indicator"></span>
-                                <div>
-                                    <strong>Full Playlist</strong>
-                                    <small>Bundled into Playlist Title folder</small>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Audio Volume Normalization Option -->
-                    <div id="normalize-row" class="controls-grid sub-grid" hidden>
-                        <div class="ctrl-cell check-cell">
-                            <label class="check-box-label">
-                                <input id="normalize-audio" type="checkbox">
-                                <span class="check-indicator"></span>
-                                <div>
-                                    <strong>Loudness Normalization (FFmpeg)</strong>
-                                    <small>Equalize audio volume levels</small>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <!-- Time Trimmer Accordion -->
-                    <details class="trim-box">
-                        <summary>✂️ Clip Time Range (Optional)</summary>
-                        <div class="controls-grid trim-inputs">
-                            <div class="ctrl-cell">
-                                <label for="start-time">Start Time</label>
-                                <input id="start-time" type="text" placeholder="00:30">
-                            </div>
-                            <div class="ctrl-cell">
-                                <label for="end-time">End Time</label>
-                                <input id="end-time" type="text" placeholder="02:45">
-                            </div>
-                        </div>
-                    </details>
-
-                    <div id="subtitle-row" class="controls-grid sub-grid" hidden>
-                        <div class="ctrl-cell check-cell">
-                            <label class="check-box-label">
-                                <input id="include-subtitles" type="checkbox">
-                                <span class="check-indicator"></span>
-                                <div>
-                                    <strong>Include Subtitles</strong>
-                                    <small>Saves matching VTT file</small>
-                                </div>
-                            </label>
-                        </div>
-                        <div class="ctrl-cell">
-                            <label for="subtitle-language">Caption Language</label>
-                            <select id="subtitle-language"></select>
-                        </div>
-                    </div>
-
-                    <button id="download-button" class="btn-primary btn-large" type="submit">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        <span>Start Conversion</span>
-                    </button>
-                </form>
             </section>
 
-            <!-- Progress Section -->
+            <!-- Progress Section with Step Pipeline Checklist -->
             <section id="progress-section" class="card progress-card" aria-live="polite" hidden>
                 <div class="card-head">
-                    <h3><span class="step-num">3</span> Processing & Converting</h3>
+                    <h3><span class="step-num">3</span> Conversion Pipeline</h3>
                 </div>
 
                 <div class="progress-head-row">
@@ -323,6 +397,26 @@
 
                 <div class="progress-track">
                     <div id="progress-fill" class="progress-bar-fill" style="width: 0%"></div>
+                </div>
+
+                <!-- Live Step-by-Step Conversion Pipeline Checklist -->
+                <div id="pipeline-checklist" class="pipeline-checklist">
+                    <div id="step-connecting" class="step-item active">
+                        <span class="step-dot"></span>
+                        <span>Resolving Media Stream & Metadata</span>
+                    </div>
+                    <div id="step-downloading" class="step-item">
+                        <span class="step-dot"></span>
+                        <span>Downloading Video & Audio Fragments</span>
+                    </div>
+                    <div id="step-encoding" class="step-item">
+                        <span class="step-dot"></span>
+                        <span>FFmpeg Encoding & Audio Conversion</span>
+                    </div>
+                    <div id="step-packaging" class="step-item">
+                        <span class="step-dot"></span>
+                        <span>Packaging Final Download File</span>
+                    </div>
                 </div>
 
                 <div class="progress-info-row">
@@ -344,7 +438,11 @@
                             </div>
                         </div>
                     </div>
-                    <a id="download-link" class="btn-primary btn-download" href="#">Save File</a>
+
+                    <div class="result-buttons">
+                        <a id="download-link" class="btn-primary btn-download" href="#">Save File</a>
+                        <button id="open-qr-btn" class="btn-secondary" type="button" title="Download on smartphone via QR code">📱 Phone QR</button>
+                    </div>
                 </div>
 
                 <!-- Skipped Items Failure Summary Report -->
@@ -377,7 +475,7 @@
         </main>
 
         <footer class="app-footer">
-            <p>MediaDrop v3.5 PRO • Universal High-Performance Media Downloader</p>
+            <p>MediaDrop Studio v3.5 • Universal High-Performance Media Downloader (100% Free)</p>
             <p class="footer-note">YouTube • Instagram Reels • TikTok • Twitter/X • Soundcloud • Reddit • Facebook</p>
         </footer>
     </div>

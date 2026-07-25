@@ -8,6 +8,17 @@ const themeLabel = document.getElementById("theme-label");
 const healthStatusBadge = document.getElementById("health-status-badge");
 const ffmpegStatusTxt = document.getElementById("ffmpeg-status-txt");
 
+const qrModal = document.getElementById("qr-modal");
+const openQrBtn = document.getElementById("open-qr-btn");
+const closeQrBtn = document.getElementById("close-qr-btn");
+const qrCodeContainer = document.getElementById("qr-code-container");
+
+const transcriptModal = document.getElementById("transcript-modal");
+const openTranscriptBtn = document.getElementById("open-transcript-btn");
+const closeTranscriptBtn = document.getElementById("close-transcript-btn");
+const transcriptTextarea = document.getElementById("transcript-textarea");
+const copyTranscriptBtn = document.getElementById("copy-transcript-btn");
+
 const analyzeForm = document.getElementById("analyze-form");
 const batchForm = document.getElementById("batch-form");
 const downloadForm = document.getElementById("download-form");
@@ -22,10 +33,13 @@ const batchUrlsTextarea = document.getElementById("batch-urls");
 const modeSingleBtn = document.getElementById("mode-single-btn");
 const modeBatchBtn = document.getElementById("mode-batch-btn");
 
+const skeletonLoader = document.getElementById("skeleton-loader");
 const searchResultsSection = document.getElementById("search-results-section");
 const searchResultsGrid = document.getElementById("search-results-grid");
 
 const previewSection = document.getElementById("preview-section");
+const resolutionGrid = document.getElementById("resolution-grid");
+
 const progressSection = document.getElementById("progress-section");
 const historySection = document.getElementById("history-section");
 const historyToggleBtn = document.getElementById("history-toggle-btn");
@@ -44,6 +58,8 @@ const audioFormatSelect = document.getElementById("audio-format");
 const audioFormatGroup = document.getElementById("audio-format-group");
 const audioBitrateSelect = document.getElementById("audio-bitrate");
 const audioBitrateGroup = document.getElementById("audio-bitrate-group");
+const audioEffectSelect = document.getElementById("audio-effect");
+const audioEffectGroup = document.getElementById("audio-effect-group");
 
 const normalizeRow = document.getElementById("normalize-row");
 const normalizeAudio = document.getElementById("normalize-audio");
@@ -56,6 +72,11 @@ const progressMessage = document.getElementById("progress-message");
 const progressPercent = document.getElementById("progress-percent");
 const progressDetail = document.getElementById("progress-detail");
 const progressSpinner = document.getElementById("progress-spinner");
+
+const stepConnecting = document.getElementById("step-connecting");
+const stepDownloading = document.getElementById("step-downloading");
+const stepEncoding = document.getElementById("step-encoding");
+const stepPackaging = document.getElementById("step-packaging");
 
 const resultCard = document.getElementById("result");
 const resultTitle = document.getElementById("result-title");
@@ -82,6 +103,7 @@ const thumbnailDownloadBtn = document.getElementById("thumbnail-download-btn");
 let currentUrl = "";
 let currentJobId = null;
 let currentMediaInfo = null;
+let currentFileDownloadUrl = "";
 let isBatchMode = false;
 
 // Toast Notification Manager
@@ -97,6 +119,58 @@ function showToast(message, type = "info") {
         setTimeout(() => toast.remove(), 300);
     }, 3500);
 }
+
+// QR Code Generator Modal
+openQrBtn.addEventListener("click", () => {
+    if (!currentFileDownloadUrl) return;
+    const fullUrl = window.location.origin + currentFileDownloadUrl;
+    qrCodeContainer.replaceChildren();
+    
+    const qrImg = document.createElement("img");
+    qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullUrl)}`;
+    qrImg.alt = "Download QR Code";
+    qrCodeContainer.appendChild(qrImg);
+    
+    qrModal.hidden = false;
+});
+
+closeQrBtn.addEventListener("click", () => {
+    qrModal.hidden = true;
+});
+
+// AI Transcript Modal & Exporter
+openTranscriptBtn.addEventListener("click", async () => {
+    if (!currentUrl) return;
+    transcriptModal.hidden = false;
+    transcriptTextarea.value = "Extracting transcript from video...";
+    copyTranscriptBtn.disabled = true;
+
+    try {
+        const response = await fetch("/api/transcript", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: currentUrl }),
+        });
+        const data = await readResponse(response);
+        transcriptTextarea.value = data.transcript || "No transcript available.";
+        copyTranscriptBtn.disabled = false;
+    } catch (err) {
+        transcriptTextarea.value = `Could not extract transcript: ${err.message}`;
+    }
+});
+
+closeTranscriptBtn.addEventListener("click", () => {
+    transcriptModal.hidden = true;
+});
+
+copyTranscriptBtn.addEventListener("click", async () => {
+    try {
+        await navigator.clipboard.writeText(transcriptTextarea.value);
+        showToast("Transcript copied to clipboard!", "success");
+    } catch {
+        showToast("Could not copy transcript", "error");
+    }
+});
 
 // Theme Switcher Handler
 const THEME_KEY = "mediadrop_theme";
@@ -189,7 +263,7 @@ async function checkHealth() {
         const response = await fetch("/api/health");
         const health = await response.json();
         if (health.status === "ok") {
-            healthStatusBadge.textContent = "🟢 Engine Online";
+            healthStatusBadge.textContent = "🟢 100% Free & Unlimited";
             if (health.ffmpeg_available) {
                 ffmpegStatusTxt.textContent = `FFmpeg Ready • ${health.free_space_mb || 0} MB Storage Available`;
             } else {
@@ -327,6 +401,41 @@ function renderSearchResults(results) {
     searchResultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// Render Resolution Cards Grid
+function renderResolutionCards(cards) {
+    resolutionGrid.replaceChildren();
+    if (!cards || !cards.length) return;
+
+    cards.forEach((cardData, idx) => {
+        const card = document.createElement("div");
+        card.className = `res-card ${idx === 0 ? 'active' : ''}`;
+        card.innerHTML = `
+            <div class="res-card-left">
+                <span class="res-icon">${cardData.icon || '▶'}</span>
+                <span class="res-label">${cardData.label}</span>
+            </div>
+            <span class="res-badge">${cardData.badge || 'HD'}</span>
+        `;
+
+        card.addEventListener("click", () => {
+            document.querySelectorAll(".res-card").forEach(c => c.classList.remove("active"));
+            card.classList.add("active");
+
+            if (cardData.is_audio) {
+                downloadForm.elements.mode.value = "audio";
+                audioFormatSelect.value = "mp3";
+                audioBitrateSelect.value = "320";
+            } else {
+                downloadForm.elements.mode.value = "video";
+                qualitySelect.value = cardData.quality;
+            }
+            syncMode();
+        });
+
+        resolutionGrid.appendChild(card);
+    });
+}
+
 // Render Single Media Info Details
 function renderDetails(media) {
     currentMediaInfo = media;
@@ -380,6 +489,9 @@ function renderDetails(media) {
 
     document.getElementById("playlist").checked = media.is_playlist;
 
+    // Populate Resolution Cards Grid
+    renderResolutionCards(media.resolution_cards);
+
     // Populate Subtitles Dropdown
     subtitleLanguage.replaceChildren();
     for (const lang of media.subtitle_languages || []) {
@@ -392,13 +504,16 @@ function renderDetails(media) {
     }
 }
 
-// Mode toggle (Video vs Audio)
+// Mode toggle (Video vs Audio vs GIF)
 function syncMode() {
     const mode = downloadForm.elements.mode.value;
     const isAudio = mode === "audio";
-    qualityGroup.hidden = isAudio;
+    const isGif = mode === "gif";
+
+    qualityGroup.hidden = isAudio || isGif;
     audioFormatGroup.hidden = !isAudio;
     audioBitrateGroup.hidden = !isAudio;
+    audioEffectGroup.hidden = !isAudio;
     normalizeRow.hidden = !isAudio;
 }
 
@@ -406,7 +521,7 @@ for (const radio of downloadForm.elements.mode) {
     radio.addEventListener("change", syncMode);
 }
 
-// Form Submit: Fetch Media Info or Search Keywords
+// Form Submit: Fetch Media Info or Search Keywords with Skeleton Loader
 analyzeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     showError("");
@@ -414,6 +529,7 @@ analyzeForm.addEventListener("submit", async (event) => {
     previewSection.hidden = true;
     progressSection.hidden = true;
     searchResultsSection.hidden = true;
+    skeletonLoader.hidden = false;
     currentUrl = urlInput.value.trim();
 
     try {
@@ -435,6 +551,7 @@ analyzeForm.addEventListener("submit", async (event) => {
     } catch (err) {
         showError(err.message);
     } finally {
+        skeletonLoader.hidden = true;
         setBusy(analyzeButton, false, "Fetch Details");
     }
 });
@@ -454,6 +571,37 @@ quickMp4Btn.addEventListener("click", () => {
     downloadForm.requestSubmit();
 });
 
+// Update Live Pipeline Checklist Items
+function updatePipelineChecklist(stage) {
+    const steps = [
+        { id: "step-connecting", key: "connecting" },
+        { id: "step-downloading", key: "downloading" },
+        { id: "step-encoding", key: "encoding" },
+        { id: "step-packaging", key: "packaging" }
+    ];
+
+    let foundCurrent = false;
+    steps.forEach(step => {
+        const el = document.getElementById(step.id);
+        if (!el) return;
+        el.classList.remove("active", "done");
+
+        if (step.key === stage) {
+            el.classList.add("active");
+            foundCurrent = true;
+        } else if (!foundCurrent && stage !== "connecting") {
+            el.classList.add("done");
+        }
+    });
+
+    if (stage === "ready") {
+        steps.forEach(step => {
+            const el = document.getElementById(step.id);
+            if (el) { el.classList.remove("active"); el.classList.add("done"); }
+        });
+    }
+}
+
 // Render Progress Info & Skipped Failure Summaries
 function renderProgress(job) {
     progressMessage.textContent = job.message || "Converting and downloading…";
@@ -465,6 +613,9 @@ function renderProgress(job) {
         progressFill.style.width = `${job.progress}%`;
         progressPercent.textContent = `${job.progress.toFixed(1)}%`;
     }
+
+    // Update pipeline stage checklist
+    updatePipelineChecklist(job.stage || "downloading");
 
     const details = [];
     if (job.downloaded_bytes) {
@@ -507,8 +658,8 @@ async function pollJob(jobId) {
             resultCard.hidden = false;
             newDownloadButton.hidden = false;
             cancelButton.hidden = true;
-            const fileUrl = `/api/jobs/${jobId}/file`;
-            downloadLink.href = fileUrl;
+            currentFileDownloadUrl = `/api/jobs/${jobId}/file`;
+            downloadLink.href = currentFileDownloadUrl;
             downloadLink.textContent = `Save ${job.filename || "file"}`;
 
             if (job.failures && job.failures.length > 0) {
@@ -521,7 +672,7 @@ async function pollJob(jobId) {
 
             // Audio Player Preview
             if (job.filename && (job.filename.endsWith(".mp3") || job.filename.endsWith(".m4a") || job.filename.endsWith(".wav"))) {
-                audioPreview.src = fileUrl;
+                audioPreview.src = currentFileDownloadUrl;
                 audioPlayerWrapper.hidden = false;
             } else {
                 audioPlayerWrapper.hidden = true;
@@ -580,6 +731,7 @@ downloadForm.addEventListener("submit", async (event) => {
     progressMessage.textContent = "Connecting to media source…";
     progressPercent.textContent = "0%";
     progressDetail.textContent = "Initializing stream…";
+    updatePipelineChecklist("connecting");
     setBusy(downloadButton, true, "Preparing…");
     progressSection.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -594,6 +746,7 @@ downloadForm.addEventListener("submit", async (event) => {
                 quality: qualitySelect.value,
                 audio_bitrate: audioBitrateSelect.value,
                 audio_format: audioFormatSelect.value,
+                audio_effect: audioEffectSelect.value,
                 normalize_audio: normalizeAudio.checked,
                 start_time: startTimeInput.value.trim() || null,
                 end_time: endTimeInput.value.trim() || null,
@@ -686,6 +839,7 @@ newDownloadButton.addEventListener("click", () => {
     cancelButton.hidden = true;
     currentJobId = null;
     currentMediaInfo = null;
+    currentFileDownloadUrl = "";
     urlInput.value = "";
     batchUrlsTextarea.value = "";
     clearButton.hidden = true;
