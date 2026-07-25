@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,6 +16,15 @@
     <div class="background-mesh"></div>
     <div id="toast-container" class="toast-container"></div>
 
+    <!-- Drag and Drop Overlay -->
+    <div id="dropzone-overlay" class="dropzone-overlay" hidden>
+        <div class="dropzone-box">
+            <span class="dropzone-icon">📥</span>
+            <strong>Drop Media Link to Convert</strong>
+            <small>Supports YouTube, Instagram Reels, TikTok, Twitter/X & Soundcloud</small>
+        </div>
+    </div>
+
     <div class="app-shell">
         <header class="top-nav">
             <div class="nav-brand">
@@ -23,7 +32,7 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </div>
                 <span class="brand-title">MediaDrop</span>
-                <span class="brand-badge">v3.5 PRO</span>
+                <span id="health-status-badge" class="brand-badge badge-green">🟢 Engine Online</span>
             </div>
 
             <div class="nav-center-hint">
@@ -32,6 +41,10 @@
             </div>
 
             <div class="nav-controls">
+                <button id="theme-toggle-btn" class="btn-subtle" type="button" title="Toggle Light/Dark Theme">
+                    <span id="theme-icon">🌙</span>
+                    <span id="theme-label">Dark</span>
+                </button>
                 <button id="history-toggle-btn" class="btn-subtle" type="button" title="View Recent Downloads">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     <span>History</span>
@@ -44,7 +57,7 @@
             <section class="hero-block">
                 <div class="status-pill">
                     <span class="indicator-dot"></span>
-                    <span>High-Performance Media Converter</span>
+                    <span id="ffmpeg-status-txt">FFmpeg Ready • High-Speed Conversion</span>
                 </div>
                 <h1>Universal Downloader <br><span class="gradient-headline">Built for Speed & Precision</span></h1>
                 <p class="hero-desc">Convert and save 4K video, Reels, audio tracks & playlists from YouTube, Instagram, TikTok, Twitter/X, and Soundcloud.</p>
@@ -241,6 +254,20 @@
                         </div>
                     </div>
 
+                    <!-- Audio Volume Normalization Option -->
+                    <div id="normalize-row" class="controls-grid sub-grid" hidden>
+                        <div class="ctrl-cell check-cell">
+                            <label class="check-box-label">
+                                <input id="normalize-audio" type="checkbox">
+                                <span class="check-indicator"></span>
+                                <div>
+                                    <strong>Loudness Normalization (FFmpeg)</strong>
+                                    <small>Equalize audio volume levels</small>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
                     <!-- Time Trimmer Accordion -->
                     <details class="trim-box">
                         <summary>✂️ Clip Time Range (Optional)</summary>
@@ -339,7 +366,10 @@
             <section id="history-section" class="card history-card" hidden>
                 <div class="card-head">
                     <h3>Recent Downloads</h3>
-                    <button id="clear-history-btn" class="btn-ghost" type="button">Clear History</button>
+                    <div class="history-actions">
+                        <button id="purge-disk-btn" class="btn-ghost" type="button" title="Purge downloaded files from disk storage">🧹 Purge Disk Storage</button>
+                        <button id="clear-history-btn" class="btn-ghost" type="button">Clear History</button>
+                    </div>
                 </div>
                 <div id="history-list" class="history-grid"></div>
                 <p id="empty-history-msg" class="empty-txt">No downloads saved in local history yet.</p>

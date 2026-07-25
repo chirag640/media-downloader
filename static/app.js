@@ -1,5 +1,13 @@
 // DOM Elements
 const toastContainer = document.getElementById("toast-container");
+const dropzoneOverlay = document.getElementById("dropzone-overlay");
+const themeToggleBtn = document.getElementById("theme-toggle-btn");
+const themeIcon = document.getElementById("theme-icon");
+const themeLabel = document.getElementById("theme-label");
+
+const healthStatusBadge = document.getElementById("health-status-badge");
+const ffmpegStatusTxt = document.getElementById("ffmpeg-status-txt");
+
 const analyzeForm = document.getElementById("analyze-form");
 const batchForm = document.getElementById("batch-form");
 const downloadForm = document.getElementById("download-form");
@@ -24,6 +32,7 @@ const historyToggleBtn = document.getElementById("history-toggle-btn");
 const historyCountBadge = document.getElementById("history-count-badge");
 const historyList = document.getElementById("history-list");
 const clearHistoryBtn = document.getElementById("clear-history-btn");
+const purgeDiskBtn = document.getElementById("purge-disk-btn");
 const emptyHistoryMsg = document.getElementById("empty-history-msg");
 
 const errorBox = document.getElementById("error");
@@ -35,6 +44,9 @@ const audioFormatSelect = document.getElementById("audio-format");
 const audioFormatGroup = document.getElementById("audio-format-group");
 const audioBitrateSelect = document.getElementById("audio-bitrate");
 const audioBitrateGroup = document.getElementById("audio-bitrate-group");
+
+const normalizeRow = document.getElementById("normalize-row");
+const normalizeAudio = document.getElementById("normalize-audio");
 
 const startTimeInput = document.getElementById("start-time");
 const endTimeInput = document.getElementById("end-time");
@@ -86,9 +98,74 @@ function showToast(message, type = "info") {
     }, 3500);
 }
 
+// Theme Switcher Handler
+const THEME_KEY = "mediadrop_theme";
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    if (theme === "light") {
+        themeIcon.textContent = "☀️";
+        themeLabel.textContent = "Light";
+    } else {
+        themeIcon.textContent = "🌙";
+        themeLabel.textContent = "Dark";
+    }
+}
+
+themeToggleBtn.addEventListener("click", () => {
+    const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
+    const newTheme = currentTheme === "dark" ? "light" : "dark";
+    localStorage.setItem(THEME_KEY, newTheme);
+    applyTheme(newTheme);
+    showToast(`Switched to ${newTheme.toUpperCase()} theme`, "info");
+});
+
+// Initialize Theme from localStorage
+applyTheme(localStorage.getItem(THEME_KEY) || "dark");
+
+// Drag & Drop Link Overlay Handler
+let dragCounter = 0;
+
+window.addEventListener("dragenter", (event) => {
+    event.preventDefault();
+    dragCounter++;
+    dropzoneOverlay.hidden = false;
+});
+
+window.addEventListener("dragover", (event) => {
+    event.preventDefault();
+});
+
+window.addEventListener("dragleave", (event) => {
+    event.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) {
+        dragCounter = 0;
+        dropzoneOverlay.hidden = true;
+    }
+});
+
+window.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dragCounter = 0;
+    dropzoneOverlay.hidden = true;
+
+    let droppedText = event.dataTransfer.getData("text").trim();
+    if (droppedText) {
+        if (isBatchMode) {
+            batchUrlsTextarea.value += (batchUrlsTextarea.value ? "\n" : "") + droppedText;
+            showToast("Added dropped URL to batch queue", "info");
+        } else {
+            urlInput.value = droppedText;
+            clearButton.hidden = false;
+            showToast("Dropped URL into input field", "info");
+            analyzeForm.requestSubmit();
+        }
+    }
+});
+
 // Global Keyboard Paste Shortcut (Ctrl+V / Cmd+V)
 document.addEventListener("paste", async (event) => {
-    // Only intercept if active element is not already an input or textarea
     const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : "";
     if (tag === "input" || tag === "textarea") return;
 
@@ -105,6 +182,25 @@ document.addEventListener("paste", async (event) => {
         }
     }
 });
+
+// System Health Check on Load
+async function checkHealth() {
+    try {
+        const response = await fetch("/api/health");
+        const health = await response.json();
+        if (health.status === "ok") {
+            healthStatusBadge.textContent = "🟢 Engine Online";
+            if (health.ffmpeg_available) {
+                ffmpegStatusTxt.textContent = `FFmpeg Ready • ${health.free_space_mb || 0} MB Storage Available`;
+            } else {
+                ffmpegStatusTxt.textContent = "Native Mode • FFmpeg Not Installed";
+            }
+        }
+    } catch {
+        healthStatusBadge.textContent = "🟡 Offline Mode";
+    }
+}
+checkHealth();
 
 // Single vs Batch Mode Switcher
 modeSingleBtn.addEventListener("click", () => {
@@ -303,6 +399,7 @@ function syncMode() {
     qualityGroup.hidden = isAudio;
     audioFormatGroup.hidden = !isAudio;
     audioBitrateGroup.hidden = !isAudio;
+    normalizeRow.hidden = !isAudio;
 }
 
 for (const radio of downloadForm.elements.mode) {
@@ -381,7 +478,6 @@ function renderProgress(job) {
     if (job.eta !== null && job.eta !== undefined) details.push(`~${job.eta}s remaining`);
     progressDetail.textContent = details.join(" • ") || "Converting media stream…";
 
-    // Render Skipped Items Report if failures present
     if (job.failures && job.failures.length > 0) {
         skippedCount.textContent = job.failures.length;
         failureList.replaceChildren();
@@ -498,6 +594,7 @@ downloadForm.addEventListener("submit", async (event) => {
                 quality: qualitySelect.value,
                 audio_bitrate: audioBitrateSelect.value,
                 audio_format: audioFormatSelect.value,
+                normalize_audio: normalizeAudio.checked,
                 start_time: startTimeInput.value.trim() || null,
                 end_time: endTimeInput.value.trim() || null,
                 playlist: document.getElementById("playlist").checked,
@@ -596,7 +693,7 @@ newDownloadButton.addEventListener("click", () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
-// Local Storage History Management
+// Local Storage History & Storage Purge Management
 const HISTORY_KEY = "mediadrop_download_history";
 
 function getHistory() {
@@ -663,6 +760,17 @@ clearHistoryBtn.addEventListener("click", () => {
     localStorage.removeItem(HISTORY_KEY);
     renderHistory();
     showToast("Download history cleared", "info");
+});
+
+purgeDiskBtn.addEventListener("click", async () => {
+    try {
+        const res = await fetch("/api/clean_downloads", { method: "POST" });
+        const data = await res.json();
+        showToast(`Freed ${data.freed_mb || 0} MB storage (${data.cleaned_items || 0} files purged)`, "success");
+        checkHealth();
+    } catch {
+        showToast("Storage purge failed", "error");
+    }
 });
 
 // Initialize History on Load

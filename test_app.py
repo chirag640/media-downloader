@@ -339,6 +339,15 @@ class AppTest(unittest.TestCase):
         status = self.client.get(f"/api/jobs/{job_id}").get_json()
         self.assertEqual(status["status"], "ready")
 
+    def test_health_and_clean_downloads(self):
+        health_res = self.client.get("/api/health")
+        self.assertEqual(health_res.status_code, 200)
+        self.assertEqual(health_res.get_json()["status"], "ok")
+
+        clean_res = self.client.post("/api/clean_downloads")
+        self.assertEqual(clean_res.status_code, 200)
+        self.assertIn("cleaned_items", clean_res.get_json())
+
     def test_download_error_cleanup(self):
         FakeYoutubeDL.error = DownloadError("unavailable")
         job_id = self.start_job()

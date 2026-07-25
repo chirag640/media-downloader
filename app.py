@@ -175,6 +175,7 @@ def build_options(
     job_id: str | None = None,
     start_time: str | None = None,
     end_time: str | None = None,
+    normalize_audio: bool = False,
 ) -> dict:
     output_template = str(
         job_dir / "%(playlist_index&{} - |)s%(title).150B [%(id)s].%(ext)s"
@@ -234,16 +235,20 @@ def build_options(
     if mode == "audio":
         codec = audio_format if audio_format in ALLOWED_AUDIO_FORMATS else "mp3"
         bitrate = audio_bitrate if audio_bitrate in ALLOWED_BITRATES else "192"
+        postprocessors = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": codec,
+                "preferredquality": bitrate,
+            }
+        ]
+        if normalize_audio:
+            options["postprocessor_args"] = {"FFmpegExtractAudio": ["-af", "loudnorm"]}
+
         options.update(
             {
                 "format": "bestaudio/best",
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": codec,
-                        "preferredquality": bitrate,
-                    }
-                ],
+                "postprocessors": postprocessors,
             }
         )
         return options
@@ -860,6 +865,57 @@ def download_thumbnail():
         as_attachment=True,
         download_name=f"{media_id}-thumbnail.{extension}",
     )
+
+
+@app.get("/api/health")
+def health_check():
+    ffmpeg_path = find_ffmpeg()
+    ffmpeg_status = bool(ffmpeg_path)
+    free_space = 0
+    total_space = 0
+    try:
+        usage = shutil.disk_usage(DOWNLOAD_ROOT)
+        free_space = usage.free
+        total_space = usage.total
+    except Exception:
+        pass
+
+    return jsonify(
+        status="ok",
+        ffmpeg_available=ffmpeg_status,
+        ytdlp_version=getattr(yt_dlp, "__version__", "unknown"),
+        free_space_mb=round(free_space / (1024 * 1024), 1),
+        total_space_mb=round(total_space / (1024 * 1024), 1),
+    )
+
+
+@app.post("/api/clean_downloads")
+def clean_downloads():
+    count = 0
+    freed_bytes = 0
+    with JOBS_LOCK:
+        active_dirs = {
+            job["job_dir"]
+            for job in JOBS.values()
+            if "job_dir" in job and job.get("status") not in {"ready", "error", "canceled"}
+        }
+
+    for item in DOWNLOAD_ROOT.iterdir():
+        if item not in active_dirs:
+            try:
+                if item.is_file():
+                    freed_bytes += item.stat().st_size
+                    item.unlink()
+                    count += 1
+                elif item.is_dir():
+                    for sub in item.rglob("*"):
+                        if sub.is_file():
+                            freed_bytes += sub.stat().st_size
+                    shutil.rmtree(item, ignore_errors=True)
+                    count += 1
+            except Exception:
+                pass
+    return jsonify(cleaned_items=count, freed_mb=round(freed_bytes / (1024 * 1024), 2))
 
 
 if __name__ == "__main__":
