@@ -247,7 +247,7 @@ def build_options(
         "fragment_retries": 10,
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "mweb", "android", "web"],
+                "player_client": ["tv", "android_vr", "web_creator", "mweb", "web"],
             }
         },
         "http_headers": {
