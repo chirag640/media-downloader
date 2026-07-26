@@ -3,16 +3,22 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import json
+import time
 import uuid
 import zipfile
+from collections import defaultdict
 from io import BytesIO
 from pathlib import Path
+import urllib.error
+import urllib.parse
 from threading import Lock, Thread
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import yt_dlp
-from flask import Flask, jsonify, render_template, request, send_file
+import storage
+from flask import Flask, jsonify, render_template, request, Response, send_file, stream_with_context
 from yt_dlp.utils import DownloadError
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -72,6 +78,132 @@ ALLOWED_AUDIO_FORMATS = {"mp3", "m4a", "wav"}
 THUMBNAIL_HOSTS = {"i.ytimg.com", "img.youtube.com"}
 
 app = Flask(__name__)
+
+# ─────────────────────────────────────────────
+# Request ID Middleware & Access Logging
+# ─────────────────────────────────────────────
+
+@app.before_request
+def assign_request_id():
+    request.request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex[:12])
+
+
+@app.after_request
+def log_request(response):
+    _logger.info(
+        f"{request.method} {request.path} -> {response.status_code}",
+        extra={"request_id": getattr(request, "request_id", "-")},
+    )
+    response.headers.set("X-Request-ID", getattr(request, "request_id", ""))
+    return response
+
+
+# ─────────────────────────────────────────────
+# Auto-Cleanup: remove downloads older than 24h
+# ─────────────────────────────────────────────
+_AUTO_CLEANUP_AGE_HOURS = 24
+_AUTO_CLEANUP_INTERVAL_SECONDS = 3600  # run once per hour
+
+
+def _auto_cleanup_worker():
+    """Background thread that removes download directories older than 24h."""
+    while True:
+        time.sleep(_AUTO_CLEANUP_INTERVAL_SECONDS)
+        try:
+            now = time.time()
+            cutoff = now - (_AUTO_CLEANUP_AGE_HOURS * 3600)
+            with JOBS_LOCK:
+                active_job_ids = set(JOBS.keys())
+            for item in DOWNLOAD_ROOT.iterdir():
+                if item.is_dir() and item.name not in active_job_ids:
+                    # Check modification time
+                    try:
+                        mtime = item.stat().st_mtime
+                        if mtime < cutoff:
+                            shutil.rmtree(item, ignore_errors=True)
+                            _logger.info(f"Auto-cleaned old download: {item.name}")
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+
+
+# Start the auto-cleanup thread (only when not testing)
+if not app.config.get("TESTING") and not app.testing:
+    _cleanup_thread = Thread(target=_auto_cleanup_worker, daemon=True)
+    _cleanup_thread.start()
+
+
+# ─────────────────────────────────────────────
+# Structured Logging & Observability
+# ─────────────────────────────────────────────
+import logging
+import uuid as _uuid
+
+
+class RequestIdFilter(logging.Filter):
+    """Add request_id to log records."""
+    def filter(self, record):
+        record.request_id = getattr(record, "request_id", "-")
+        return True
+
+
+# Configure structured JSON-like logging
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(
+    logging.Formatter(
+        fmt='%(asctime)s [%(levelname)s] request=%(request_id)s %(message)s',
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+)
+_logger = logging.getLogger("mediadrop")
+_logger.addHandler(_log_handler)
+_logger.addFilter(RequestIdFilter())
+_logger.setLevel(logging.INFO)
+
+
+# ─────────────────────────────────────────────
+# Rate Limiter (in-memory, no external deps)
+# ─────────────────────────────────────────────
+RATE_LIMITS = {
+    "/api/info": (30, 60),       # 30 requests per 60 seconds
+    "/api/jobs": (10, 60),       # 10 requests per 60 seconds
+    "/api/batch_jobs": (3, 60),  # 3 requests per 60 seconds
+    "/api/transcript": (10, 60), # 10 requests per 60 seconds
+}
+_rate_store: dict[str, list[float]] = defaultdict(list)
+_rate_lock = Lock()
+
+
+def check_rate_limit(endpoint: str) -> bool:
+    """Return True if request is allowed, False if rate limited."""
+    if endpoint not in RATE_LIMITS:
+        return True
+    max_requests, window = RATE_LIMITS[endpoint]
+    now = time.time()
+    client_ip = request.remote_addr or "unknown"
+    key = f"{client_ip}:{endpoint}"
+    with _rate_lock:
+        timestamps = _rate_store[key]
+        # Remove expired entries
+        _rate_store[key] = [t for t in timestamps if now - t < window]
+        if len(_rate_store[key]) >= max_requests:
+            return False
+        _rate_store[key].append(now)
+        return True
+
+
+@app.before_request
+def enforce_rate_limit():
+    """Check rate limits before processing API requests."""
+    if request.endpoint and request.path in RATE_LIMITS:
+        if not check_rate_limit(request.path):
+            retry_after = RATE_LIMITS[request.path][1]
+            return jsonify(
+                error="Too many requests. Please wait a moment and try again.",
+                retry_after=retry_after
+            ), 429
+
 
 # ponytail: in-memory jobs fit this single-user local app; use a persistent
 # queue and expiry worker before multi-user hosting.
@@ -374,12 +506,6 @@ def make_zip(job_dir: Path, files: list[Path], title: str | None = None) -> Path
     return zip_path
 
 
-def set_job(job_id: str, **changes) -> None:
-    with JOBS_LOCK:
-        if job := JOBS.get(job_id):
-            job.update(changes)
-
-
 def ensure_not_cancelled(job_id: str) -> None:
     with JOBS_LOCK:
         if job := JOBS.get(job_id):
@@ -589,6 +715,9 @@ def video_details(info: dict) -> dict:
         platform = "youtube"
 
     playlist_entries = []
+    total_duration = 0
+    short_count = 0
+    long_count = 0
     if is_playlist and entries:
         for idx, entry in enumerate(entries[:50], 1):
             if entry:
@@ -599,6 +728,11 @@ def video_details(info: dict) -> dict:
                     "duration": entry.get("duration"),
                     "thumbnail": entry.get("thumbnail"),
                 })
+                duration = entry.get("duration") or 0
+                total_duration += duration
+        # Add duration analysis: count shorts (<60s) and longs (>1200s)
+        short_count = sum(1 for e in playlist_entries if e["duration"] and e["duration"] < 60)
+        long_count = sum(1 for e in playlist_entries if e["duration"] and e["duration"] > 1200)
 
     resolution_cards = []
     for h in heights:
@@ -635,6 +769,9 @@ def video_details(info: dict) -> dict:
         "qualities": [str(height) for height in heights],
         "resolution_cards": resolution_cards,
         "playlist_entries": playlist_entries,
+        "playlist_total_duration": total_duration if is_playlist and playlist_entries else None,
+        "playlist_short_count": short_count if is_playlist else None,
+        "playlist_long_count": long_count if is_playlist else None,
         "audio_bitrates": ["320", "192", "128"],
         "audio_formats": ["mp3", "m4a", "wav"],
         "subtitle_languages": subtitle_languages,
@@ -829,6 +966,21 @@ def start_download():
     ):
         return jsonify(error="Invalid subtitle language."), 400
 
+    # ── Download Security: check disk space before starting ──
+    try:
+        total, used, free = shutil.disk_usage(DOWNLOAD_ROOT)
+        free_mb = free / (1024 * 1024)
+        if free_mb < 50:
+            _logger.warning(f"Low disk space ({free_mb:.0f} MB free) before starting download {url[:60]}")
+    except Exception:
+        pass
+
+    # ── Download Security: enforce max input length ──
+    if len(url) > 2048:
+        return jsonify(error="URL is too long."), 400
+    if len(audio_effect) > 50 or len(sponsorblock or "") > 50:
+        return jsonify(error="Invalid parameter length."), 400
+
     job_id = uuid.uuid4().hex
     job_dir = DOWNLOAD_ROOT / job_id
     job_dir.mkdir(parents=True)
@@ -840,6 +992,23 @@ def start_download():
             "message": "Queued…",
             "job_dir": job_dir,
             "failures": [],
+            # Store original params for retry support
+            "url": url,
+            "mode": mode,
+            "quality": quality,
+            "download_playlist": download_playlist,
+            "cookies_from_browser": cookies_tuple,
+            "include_subtitles": include_subtitles,
+            "subtitle_language": subtitle_language or None,
+            "audio_bitrate": audio_bitrate,
+            "audio_format": audio_format,
+            "start_time": start_time,
+            "end_time": end_time,
+            "normalize_audio": normalize_audio,
+            "audio_effect": audio_effect,
+            "playlist_items": playlist_items,
+            "sponsorblock": sponsorblock,
+            "mute_video": mute_video,
         }
 
     run_job_async(
@@ -1190,6 +1359,372 @@ def update_ytdlp_engine():
         return jsonify(error=f"Update failed: {res.stderr[:200]}"), 500
     except Exception as exc:
         return jsonify(error=f"Update exception: {friendly_error(exc)}"), 500
+
+
+# ─────────────────────────────────────────────
+# Phase 2: Presets API
+# ─────────────────────────────────────────────
+@app.get("/api/presets")
+def get_presets():
+    return jsonify(presets=storage.get_all_presets())
+
+
+@app.post("/api/presets")
+def create_preset():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    mode = str(data.get("mode", "video"))
+    quality = str(data.get("quality", "720"))
+    audio_bitrate = str(data.get("audio_bitrate", "192"))
+    audio_format = str(data.get("audio_format", "mp3"))
+    if not name:
+        return jsonify(error="Preset name is required."), 400
+    if mode not in {"video", "audio", "gif"}:
+        return jsonify(error="Invalid mode."), 400
+    if quality not in ALLOWED_QUALITIES:
+        return jsonify(error="Invalid video quality."), 400
+    if audio_bitrate not in ALLOWED_BITRATES:
+        return jsonify(error="Invalid audio bitrate."), 400
+    if audio_format not in ALLOWED_AUDIO_FORMATS:
+        return jsonify(error="Invalid audio format."), 400
+    storage.save_preset(name, mode, quality, audio_bitrate, audio_format)
+    return jsonify(status="ok", name=name), 201
+
+
+@app.delete("/api/presets/<name>")
+def remove_preset(name: str):
+    storage.delete_preset(name)
+    return jsonify(status="ok")
+
+
+# ─────────────────────────────────────────────
+# Phase 2: Library / File Manager API
+# ─────────────────────────────────────────────
+@app.get("/api/library")
+def get_library():
+    with JOBS_LOCK:
+        ready_jobs = {
+            jid: j for jid, j in JOBS.items() if j.get("status") == "ready" and j.get("path")
+        }
+    library = []
+    for jid, job in ready_jobs.items():
+        fpath = Path(job["path"])
+        if fpath.exists():
+            stat = fpath.stat()
+            library.append({
+                "job_id": jid,
+                "filename": job.get("filename", "unknown"),
+                "size_bytes": stat.st_size,
+                "created_at": stat.st_mtime,
+                "url": f"/api/jobs/{jid}/file",
+            })
+    library.sort(key=lambda x: x["created_at"], reverse=True)
+    return jsonify(files=library)
+
+
+@app.delete("/api/library/<job_id>")
+def delete_library_file(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if not job:
+        return jsonify(error="Job not found."), 404
+    job_dir = Path(job.get("job_dir")) if job.get("job_dir") else None
+    # Path traversal protection: ensure job_dir is within DOWNLOAD_ROOT
+    if job_dir and job_dir.exists():
+        try:
+            job_dir.resolve().relative_to(DOWNLOAD_ROOT.resolve())
+            shutil.rmtree(job_dir, ignore_errors=True)
+        except ValueError:
+            return jsonify(error="Invalid job directory."), 400
+    with JOBS_LOCK:
+        JOBS.pop(job_id, None)
+    storage.save_job_record(job_id, status="deleted")
+    return jsonify(status="ok")
+
+
+@app.get("/api/stats")
+def get_stats():
+    total, used, free = shutil.disk_usage(DOWNLOAD_ROOT)
+    with JOBS_LOCK:
+        job_counts = defaultdict(int)
+        for job in JOBS.values():
+            job_counts[job.get("status", "unknown")] += 1
+    total_history = 0
+    try:
+        with storage.get_db_connection() as conn:
+            row = conn.execute("SELECT COUNT(*) as cnt FROM history").fetchone()
+            total_history = row["cnt"] if row else 0
+    except Exception:
+        pass
+    return jsonify(
+        disk_total_mb=round(total / (1024 * 1024), 1),
+        disk_used_mb=round(used / (1024 * 1024), 1),
+        disk_free_mb=round(free / (1024 * 1024), 1),
+        job_counts=dict(job_counts),
+        total_history=total_history,
+    )
+
+
+# ─────────────────────────────────────────────
+# Phase 3: SSE endpoint for real-time job progress
+# ─────────────────────────────────────────────
+@app.get("/api/jobs/<job_id>/events")
+def job_sse_events(job_id: str):
+    """Server-Sent Events endpoint for real-time job progress updates."""
+    from flask import stream_with_context
+
+    def generate():
+        last_status = None
+        stale_count = 0
+        while True:
+            with JOBS_LOCK:
+                job = JOBS.get(job_id)
+
+            if not job:
+                yield f"event: error\ndata: {json.dumps({'error': 'Job not found'})}\n\n"
+                break
+
+            status = job.get("status")
+
+            # Build the public job object (same as GET /api/jobs/<id>)
+            public_job = {
+                key: job.get(key)
+                for key in (
+                    "status",
+                    "stage",
+                    "progress",
+                    "message",
+                    "downloaded_bytes",
+                    "total_bytes",
+                    "speed",
+                    "eta",
+                    "filename",
+                    "error",
+                    "failures",
+                    "success_count",
+                    "failed_count",
+                )
+                if key in job
+            }
+
+            # Only send if status changed or progress updated significantly
+            if public_job != last_status:
+                yield f"data: {json.dumps(public_job)}\n\n"
+                last_status = public_job
+                stale_count = 0
+            else:
+                stale_count += 1
+
+            # Terminal states
+            if status in ("ready", "error", "canceled"):
+                yield f"event: done\ndata: {json.dumps({'status': status})}\n\n"
+                break
+
+            # Safety: close if stale for too long (no updates for 30s)
+            if stale_count > 60:  # 60 * 0.5s = 30s
+                yield f"event: timeout\ndata: {json.dumps({'error': 'Connection timed out'})}\n\n"
+                break
+
+            time.sleep(0.5)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ─────────────────────────────────────────────
+# Phase 3: Media preview endpoint
+# ─────────────────────────────────────────────
+@app.get("/api/jobs/<job_id>/preview")
+def job_preview(job_id: str):
+    """Return media preview info for a completed job."""
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+
+    if not job:
+        return jsonify(error="Job not found."), 404
+    if job.get("status") != "ready":
+        return jsonify(error="File not ready."), 409
+
+    path = job.get("path")
+    if not path:
+        return jsonify(error="No file path."), 404
+
+    fpath = Path(path)
+    if not fpath.exists():
+        return jsonify(error="File not found on disk."), 404
+
+    stat = fpath.stat()
+    suffix = fpath.suffix.lower()
+
+    # Determine media type
+    if suffix in (".mp4", ".webm", ".mkv", ".mov"):
+        media_type = "video"
+    elif suffix in (".mp3", ".m4a", ".wav", ".ogg", ".flac"):
+        media_type = "audio"
+    elif suffix in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        media_type = "image"
+    else:
+        media_type = "other"
+
+    return jsonify({
+        "job_id": job_id,
+        "filename": fpath.name,
+        "size_bytes": stat.st_size,
+        "media_type": media_type,
+        "suffix": suffix,
+        "download_url": f"/api/jobs/{job_id}/file",
+    })
+
+
+# ─────────────────────────────────────────────
+# Phase 4: SponsorBlock Segments API
+# ─────────────────────────────────────────────
+
+SPONSORBLOCK_API = "https://sponsor.ajax.lol/api/skipSegments"
+SPONSORBLOCK_CATEGORIES = ["sponsor", "intro", "outro", "selfpromo", "interaction", "music_offtopic", "preview", "filler", "exclusive_access"]
+
+
+@app.get("/api/sponsorblock_segments")
+def sponsorblock_segments():
+    """Proxy SponsorBlock API to get skip segments for a video."""
+    video_id = request.args.get("videoId", "").strip()
+    categories = request.args.get("categories", "")
+
+    if not video_id or not all(c.isalnum() or c in "-_" for c in video_id):
+        return jsonify(error="Invalid or missing videoId parameter."), 400
+
+    # Build the request URL
+    if categories:
+        selected = [c.strip() for c in categories.split(",") if c.strip() in SPONSORBLOCK_CATEGORIES]
+    else:
+        selected = SPONSORBLOCK_CATEGORIES[:]
+
+    # SponsorBlock API can accept multiple categories via query params
+    params = {"videoID": video_id}
+    for cat in selected:
+        params.setdefault("category", []).append(cat)
+
+    try:
+        url = f"{SPONSORBLOCK_API}?videoID={urllib.parse.quote(video_id)}"
+        for cat in selected:
+            url += f"&category={urllib.parse.quote(cat)}"
+
+        req = Request(url, headers={"User-Agent": "MediaDropStudio/3.5"})
+        with urlopen(req, timeout=10) as source:
+            data = json.loads(source.read().decode("utf-8"))
+
+        # Parse segments into a clean format
+        segments = []
+        total_saved = 0
+        for entry in data:
+            if isinstance(entry, dict) and "segment" in entry:
+                start, end = entry["segment"]
+                duration = end - start
+                total_saved += duration
+                segments.append({
+                    "start": round(start, 1),
+                    "end": round(end, 1),
+                    "duration": round(duration, 1),
+                    "category": entry.get("category", "unknown"),
+                    "UUID": entry.get("UUID", ""),
+                    "videoDuration": entry.get("videoDuration", None),
+                })
+
+        # Determine video duration from segments
+        video_duration = None
+        for s in segments:
+            if s["videoDuration"]:
+                video_duration = s["videoDuration"]
+                break
+
+        segments.sort(key=lambda s: s["start"])
+
+        return jsonify({
+            "video_id": video_id,
+            "segments": segments,
+            "total_saved": round(total_saved, 1),
+            "segment_count": len(segments),
+            "video_duration": video_duration,
+            "categories_found": list(set(s["category"] for s in segments)),
+        })
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return jsonify(segments=[], total_saved=0, segment_count=0, video_duration=None, categories_found=[])
+        return jsonify(error=f"SponsorBlock API error: {exc.code}"), exc.code
+    except Exception as exc:
+        return jsonify(error=f"Failed to fetch SponsorBlock segments: {friendly_error(exc)}"), 500
+
+
+# ─────────────────────────────────────────────
+# Phase 2: Retry endpoint
+# ─────────────────────────────────────────────
+@app.post("/api/jobs/<job_id>/retry")
+def retry_download(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+    if not job:
+        return jsonify(error="Job not found."), 404
+    if job.get("status") not in {"error", "canceled"}:
+        return jsonify(error="Only failed or canceled jobs can be retried."), 400
+    # Re-queue the job with all original parameters
+    job_dir = Path(job.get("job_dir")) if job.get("job_dir") else None
+    if not job_dir or not job_dir.exists():
+        job_dir = DOWNLOAD_ROOT / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+    with JOBS_LOCK:
+        JOBS[job_id] = {
+            "status": "queued",
+            "stage": "connecting",
+            "progress": 0,
+            "message": "Retrying…",
+            "job_dir": job_dir,
+            "failures": [],
+            # Preserve original params
+            "url": job.get("url"),
+            "mode": job.get("mode", "video"),
+            "quality": job.get("quality", "720"),
+            "download_playlist": job.get("download_playlist", False),
+            "cookies_from_browser": job.get("cookies_from_browser"),
+            "include_subtitles": job.get("include_subtitles", False),
+            "subtitle_language": job.get("subtitle_language"),
+            "audio_bitrate": job.get("audio_bitrate", "192"),
+            "audio_format": job.get("audio_format", "mp3"),
+            "start_time": job.get("start_time"),
+            "end_time": job.get("end_time"),
+            "normalize_audio": job.get("normalize_audio", False),
+            "audio_effect": job.get("audio_effect", "none"),
+            "playlist_items": job.get("playlist_items"),
+            "sponsorblock": job.get("sponsorblock"),
+            "mute_video": job.get("mute_video", False),
+        }
+    run_job_async(
+        run_download,
+        job_id,
+        job_dir,
+        job.get("url", ""),
+        job.get("mode", "video"),
+        job.get("quality", "720"),
+        job.get("download_playlist", False),
+        job.get("cookies_from_browser"),
+        job.get("include_subtitles", False),
+        job.get("subtitle_language"),
+        job.get("audio_bitrate", "192"),
+        job.get("audio_format", "mp3"),
+        job.get("start_time"),
+        job.get("end_time"),
+        job.get("normalize_audio", False),
+        job.get("audio_effect", "none"),
+        job.get("playlist_items"),
+        job.get("sponsorblock"),
+        job.get("mute_video", False),
+    )
+    return jsonify(job_id=job_id), 202
 
 
 if __name__ == "__main__":
