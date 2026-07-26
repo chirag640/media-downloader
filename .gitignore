@@ -2,3 +2,9 @@
 __pycache__/
 downloads/
 *.pyc
+build/
+dist/
+*.exe
+*.pkg
+*.pyz
+*.toc

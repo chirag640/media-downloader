@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.ds_store
+dist
+build
+*.exe
+downloads/*
+!downloads/.gitkeep
+mediadrop.db

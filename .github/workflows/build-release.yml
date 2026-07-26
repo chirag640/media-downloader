@@ -27,7 +27,8 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install flask yt-dlp waitress pyinstaller
+          pip install flask yt-dlp waitress pywebview pyinstaller
+
 
       - name: Compile Executable using PyInstaller
         run: |

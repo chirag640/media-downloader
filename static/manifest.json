@@ -1,16 +1,17 @@
 {
   "name": "MediaDrop Studio",
   "short_name": "MediaDrop",
-  "description": "High-Performance Universal Media Downloader & Converter Studio",
+  "description": "High-performance video & audio downloader suite.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#090d16",
+  "background_color": "#0f172a",
   "theme_color": "#6366f1",
+  "orientation": "any",
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>",
-      "sizes": "192x192 512x512",
-      "type": "image/svg+xml"
+      "src": "/static/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
     }
   ]
 }
