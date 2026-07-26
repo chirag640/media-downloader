@@ -272,13 +272,16 @@ def friendly_error(exc: Exception) -> str:
 
 
 def is_valid_youtube_url(value: str) -> bool:
-    """Accept only normal HTTP(S) YouTube URLs."""
+    """Accept valid HTTP(S) media URLs for allowed hosts."""
     try:
         parsed = urlparse(value.strip())
+        host = (parsed.hostname or "").lower()
     except ValueError:
         return False
 
-    return parsed.scheme in {"http", "https"} and parsed.hostname in ALLOWED_HOSTS
+    return parsed.scheme in {"http", "https"} and (
+        host in ALLOWED_HOSTS or any(host.endswith("." + h) for h in ALLOWED_HOSTS)
+    )
 
 
 def parse_time_seconds(time_str: str | None) -> int | None:
