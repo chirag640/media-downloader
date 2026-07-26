@@ -918,6 +918,15 @@ function renderDetails(media) {
     qualitySelect.value = media.qualities.includes("1080") ? "1080" : (media.qualities[0] || "best");
 
     document.getElementById("playlist").checked = media.is_playlist;
+    const playlistCheckCell = document.getElementById("playlist-check-cell");
+    if (playlistCheckCell) {
+        playlistCheckCell.hidden = !media.is_playlist;
+    }
+
+    const sponsorblockGroup = document.getElementById("sponsorblock-group");
+    if (sponsorblockGroup) {
+        sponsorblockGroup.hidden = media.platform !== "youtube";
+    }
 
     renderResolutionCards(media.resolution_cards);
     renderPlaylistPicker(media.playlist_entries);
