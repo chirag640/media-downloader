@@ -820,6 +820,7 @@ if (playlistRangeInput) {
 
 // Render Resolution Cards Grid (100% Safe DOM rendering)
 function renderResolutionCards(cards) {
+    if (!resolutionGrid) return;
     resolutionGrid.replaceChildren();
     if (!cards || !cards.length) return;
 
