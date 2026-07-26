@@ -101,6 +101,9 @@ class AppTest(unittest.TestCase):
         app.DOWNLOAD_ROOT = Path(self.temp_dir.name)
         with app.JOBS_LOCK:
             app.JOBS.clear()
+        # Clear rate limiter store to avoid test interference
+        with app._rate_lock:
+            app._rate_store.clear()
         self.client = app.app.test_client()
         FakeYoutubeDL.files = {"video.mp4": b"video"}
         FakeYoutubeDL.error = None
@@ -462,6 +465,281 @@ class AppTest(unittest.TestCase):
         self.assertEqual(status["status"], "error")
         self.assertIn("unavailable", status["error"])
         self.assertEqual(list(app.DOWNLOAD_ROOT.iterdir()), [])
+
+    # ─────────────────────────────────────────────
+    # Phase 3 Tests: SSE Events, Preview, Stats
+    # ─────────────────────────────────────────────
+
+    def test_sse_events_endpoint(self):
+        """Test that SSE endpoint streams job progress events."""
+        job_id = self.start_job()
+        with patch.object(app.yt_dlp, "YoutubeDL", FakeYoutubeDL):
+            response = self.client.get(f"/api/jobs/{job_id}/events")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, "text/event-stream")
+            data = response.get_data(as_text=True)
+            self.assertIn("data:", data)
+            self.assertIn("ready", data)
+
+    def test_preview_endpoint(self):
+        """Test that preview endpoint returns file metadata."""
+        job_id = self.start_job()
+        preview_res = self.client.get(f"/api/jobs/{job_id}/preview")
+        self.assertEqual(preview_res.status_code, 200)
+        data = preview_res.get_json()
+        self.assertIn("filename", data)
+        self.assertIn("media_type", data)
+        self.assertIn("download_url", data)
+        self.assertEqual(data["media_type"], "video")
+        self.assertEqual(data["filename"], "video.mp4")
+
+    def test_preview_not_found(self):
+        """Test preview for non-existent job."""
+        res = self.client.get("/api/jobs/nonexistent/preview")
+        self.assertEqual(res.status_code, 404)
+
+    def test_library_api(self):
+        """Test library listing returns completed downloads."""
+        # Start and complete a job
+        job_id = self.start_job()
+        lib_res = self.client.get("/api/library")
+        self.assertEqual(lib_res.status_code, 200)
+        data = lib_res.get_json()
+        self.assertIn("files", data)
+        # Our completed job should appear in the library
+        self.assertTrue(any(f["job_id"] == job_id for f in data["files"]))
+
+    def test_library_delete(self):
+        """Test deleting a library file."""
+        job_id = self.start_job()
+        del_res = self.client.delete(f"/api/library/{job_id}")
+        self.assertEqual(del_res.status_code, 200)
+        # Verify it's gone from library
+        lib_res = self.client.get("/api/library")
+        data = lib_res.get_json()
+        self.assertFalse(any(f["job_id"] == job_id for f in data["files"]))
+
+    def test_stats_endpoint(self):
+        """Test stats endpoint returns system metrics."""
+        self.start_job()
+        stats_res = self.client.get("/api/stats")
+        self.assertEqual(stats_res.status_code, 200)
+        data = stats_res.get_json()
+        self.assertIn("disk_total_mb", data)
+        self.assertIn("disk_free_mb", data)
+        self.assertIn("job_counts", data)
+        # Should have at least one ready job
+        self.assertGreaterEqual(data["job_counts"].get("ready", 0), 0)
+
+    def test_retry_failed_job(self):
+        """Test retry endpoint for failed jobs."""
+        FakeYoutubeDL.error = DownloadError("unavailable")
+        job_id = self.start_job()
+        # Should be in error state
+        status_res = self.client.get(f"/api/jobs/{job_id}").get_json()
+        self.assertEqual(status_res["status"], "error")
+        # Retry should return 202
+        FakeYoutubeDL.error = None
+        retry_res = self.client.post(f"/api/jobs/{job_id}/retry")
+        self.assertEqual(retry_res.status_code, 202)
+
+    # ─────────────────────────────────────────────
+    # Phase 3 — Enhanced Tests: utility functions, presets, queue
+    # ─────────────────────────────────────────────
+
+    def test_parse_time_seconds_edge_cases(self):
+        """Test time parsing edge cases."""
+        self.assertIsNone(app.parse_time_seconds(None))
+        self.assertIsNone(app.parse_time_seconds(""))
+        self.assertIsNone(app.parse_time_seconds("invalid"))
+        self.assertEqual(app.parse_time_seconds("30"), 30)
+        self.assertEqual(app.parse_time_seconds("01:30"), 90)
+        self.assertEqual(app.parse_time_seconds("01:00:30"), 3630)
+
+    def test_sanitize_folder_name(self):
+        """Test folder name sanitization."""
+        self.assertEqual(app.sanitize_folder_name(None), "media-download")
+        self.assertEqual(app.sanitize_folder_name(""), "media-download")
+        self.assertEqual(app.sanitize_folder_name("Hello World"), "Hello World")
+        # Special characters should be replaced
+        result = app.sanitize_folder_name("File: Test?/\\name")
+        self.assertNotIn("/", result)
+        self.assertNotIn("?", result)
+
+    def test_friendly_error_messages(self):
+        """Test error message mapping."""
+        exc = Exception("ERROR: Private video. Sign in to view.")
+        msg = app.friendly_error(exc)
+        self.assertIn("private", msg.lower())
+
+        exc = Exception("This video is age-restricted and cannot be accessed.")
+        msg = app.friendly_error(exc)
+        self.assertIn("age", msg.lower())
+
+        exc = Exception("ERROR: This video is unavailable.")
+        msg = app.friendly_error(exc)
+        self.assertIn("unavailable", msg.lower())
+
+        exc = Exception("Generic error message")
+        msg = app.friendly_error(exc)
+        self.assertEqual(msg, "Generic error message")
+
+    def test_build_options_all_modes(self):
+        """Test build_options for all download modes."""
+        # Video mode with specific quality
+        opts = app.build_options(app.DOWNLOAD_ROOT, "video", "1080", False)
+        self.assertIn("1080", opts["format"])
+        self.assertEqual(opts["merge_output_format"], "mp4")
+
+        # Audio mode
+        opts = app.build_options(app.DOWNLOAD_ROOT, "audio", "best", False, audio_bitrate="320", audio_format="mp3")
+        self.assertEqual(opts["format"], "bestaudio/best")
+        self.assertEqual(opts["postprocessors"][0]["preferredquality"], "320")
+        self.assertEqual(opts["postprocessors"][0]["preferredcodec"], "mp3")
+
+        # GIF mode
+        opts = app.build_options(app.DOWNLOAD_ROOT, "gif", "best", False)
+        self.assertEqual(opts["format"], "bestvideo[height<=720]/best")
+
+        # Playlist mode
+        opts = app.build_options(app.DOWNLOAD_ROOT, "video", "best", True)
+        self.assertFalse(opts["noplaylist"])
+
+        # Mute video mode
+        opts = app.build_options(app.DOWNLOAD_ROOT, "video", "720", False, mute_video=True)
+        self.assertNotIn("+audio", opts["format"])
+
+        # SponsorBlock remove mode
+        opts = app.build_options(app.DOWNLOAD_ROOT, "video", "720", False, sponsorblock="remove")
+        self.assertIn("postprocessors", opts)
+
+    def test_build_options_audio_effects(self):
+        """Test audio postprocessor args for effects."""
+        # Nightcore
+        opts = app.build_options(app.DOWNLOAD_ROOT, "audio", "best", False, audio_effect="nightcore", audio_format="mp3", audio_bitrate="192")
+        args = opts.get("postprocessor_args", {}).get("FFmpegExtractAudio", [])
+        self.assertIn("1.25", "".join(args))
+
+        # Slowed
+        opts = app.build_options(app.DOWNLOAD_ROOT, "audio", "best", False, audio_effect="slowed")
+        args = opts.get("postprocessor_args", {}).get("FFmpegExtractAudio", [])
+        self.assertIn("0.85", "".join(args))
+
+        # Normalized
+        opts = app.build_options(app.DOWNLOAD_ROOT, "audio", "best", False, normalize_audio=True)
+        args = opts.get("postprocessor_args", {}).get("FFmpegExtractAudio", [])
+        self.assertIn("loudnorm", "".join(args))
+
+        # No effect
+        opts = app.build_options(app.DOWNLOAD_ROOT, "audio", "best", False, audio_effect="none")
+        self.assertNotIn("postprocessor_args", opts)
+
+    def test_rate_limiting(self):
+        """Test the rate limiter returns False when limit exceeded."""
+        # Test a rate-limited endpoint
+        with app.app.test_request_context("/api/info"):
+            # The first 30 requests should be allowed
+            for _ in range(30):
+                self.assertTrue(app.check_rate_limit("/api/info"))
+            # The 31st should be blocked
+            self.assertFalse(app.check_rate_limit("/api/info"))
+
+    def test_valid_url_multiple_platforms(self):
+        """Test URL validation for all supported platforms."""
+        valid_urls = [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "https://www.instagram.com/reel/C123456/",
+            "https://www.tiktok.com/@user/video/12345678",
+            "https://twitter.com/user/status/12345678",
+            "https://x.com/user/status/12345678",
+            "https://soundcloud.com/artist/track",
+            "https://www.reddit.com/r/videos/comments/abc/",
+            "https://www.facebook.com/watch?v=123",
+        ]
+        for url in valid_urls:
+            with self.subTest(url=url):
+                self.assertTrue(app.is_valid_youtube_url(url), f"Expected {url} to be valid")
+
+        invalid_urls = [
+            "https://example.com/video",
+            "ftp://youtube.com/video",
+            "",
+            "not-a-url",
+        ]
+        for url in invalid_urls:
+            with self.subTest(url=url):
+                self.assertFalse(app.is_valid_youtube_url(url), f"Expected {url} to be invalid")
+
+    def test_video_details_playlist(self):
+        """Test video_details with playlist info."""
+        info = {
+            "_type": "playlist",
+            "title": "My Playlist",
+            "uploader": "Creator",
+            "entries": [
+                {"id": "v1", "title": "Video 1", "formats": [{"height": 720}]},
+                {"id": "v2", "title": "Video 2", "formats": [{"height": 1080}]},
+            ],
+        }
+        details = app.video_details(info)
+        self.assertTrue(details["is_playlist"])
+        self.assertEqual(details["item_count"], 2)
+        self.assertEqual(len(details["playlist_entries"]), 2)
+
+    def test_storage_presets_crud(self):
+        """Test presets CRUD operations via storage."""
+        import storage
+        # Get all presets (defaults should exist)
+        presets = storage.get_all_presets()
+        self.assertGreater(len(presets), 0)
+        # Create a preset
+        storage.save_preset("Test Preset", "video", "720", "192", "mp3")
+        presets = storage.get_all_presets()
+        self.assertTrue(any(p["name"] == "Test Preset" for p in presets))
+        # Delete it
+        storage.delete_preset("Test Preset")
+        presets = storage.get_all_presets()
+        self.assertFalse(any(p["name"] == "Test Preset" for p in presets))
+
+    def test_storage_job_record_crud(self):
+        """Test job record persistence via storage."""
+        import storage
+        # Save a record
+        storage.save_job_record("phase3_test", "completed", "ready", 100.0, "Done", "output.mp4", "/tmp/jobdir", "/tmp/output.mp4", None, [{"msg": "test"}])
+        # Retrieve it
+        rec = storage.get_job_record("phase3_test")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["status"], "completed")
+        self.assertEqual(rec["filename"], "output.mp4")
+        self.assertEqual(rec["failures"], [{"msg": "test"}])
+        # Update it
+        storage.save_job_record("phase3_test", "queued", stage="updated")
+        rec = storage.get_job_record("phase3_test")
+        self.assertEqual(rec["stage"], "updated")
+
+    def test_storage_history(self):
+        """Test history CRUD via storage."""
+        import storage
+        item = {
+            "id": "hist_test",
+            "title": "Test History",
+            "uploader": "Tester",
+            "thumbnail": "http://example.com/thumb.jpg",
+            "filename": "test.mp4",
+            "url": "https://youtu.be/test",
+            "timestamp": "12:00",
+        }
+        storage.save_history_item(item)
+        items = storage.get_history_items()
+        self.assertTrue(any(i["id"] == "hist_test" for i in items))
+        # Filter by query
+        items = storage.get_history_items(query="Test")
+        self.assertGreater(len(items), 0)
+        # Clear
+        storage.clear_history_items()
+        items = storage.get_history_items()
+        self.assertEqual(len(items), 0)
 
 
 if __name__ == "__main__":

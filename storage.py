@@ -55,6 +55,17 @@ def init_db() -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
+        # Performance indexes for frequently queried columns
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_history_url ON history(url);")
+        # Enable WAL mode and auto-vacuum for performance
+        conn.execute("PRAGMA auto_vacuum=INCREMENTAL;")
+        conn.commit()
+        # Incremental vacuum to reclaim space from deleted records
+        conn.execute("PRAGMA incremental_vacuum;")
         conn.commit()
 
 
@@ -153,5 +164,50 @@ def clear_history_items() -> None:
         conn.commit()
 
 
+# ─────────────────────────────────────────────
+# Presets CRUD
+# ─────────────────────────────────────────────
+DEFAULT_PRESETS = [
+    {"name": "YouTube 1080p MP4", "mode": "video", "quality": "1080", "audio_bitrate": "192", "audio_format": "mp3"},
+    {"name": "Podcast MP3 320k", "mode": "audio", "quality": "best", "audio_bitrate": "320", "audio_format": "mp3"},
+    {"name": "Instagram Reel", "mode": "video", "quality": "best", "audio_bitrate": "192", "audio_format": "mp3"},
+    {"name": "TikTok Download", "mode": "video", "quality": "best", "audio_bitrate": "192", "audio_format": "mp3"},
+    {"name": "Audio Only 128k", "mode": "audio", "quality": "best", "audio_bitrate": "128", "audio_format": "mp3"},
+    {"name": "GIF Meme", "mode": "gif", "quality": "best", "audio_bitrate": "192", "audio_format": "mp3"},
+]
+
+
+def _ensure_default_presets() -> None:
+    with get_db_connection() as conn:
+        for preset in DEFAULT_PRESETS:
+            conn.execute(
+                "INSERT OR IGNORE INTO presets (name, mode, quality, audio_bitrate, audio_format) VALUES (?, ?, ?, ?, ?)",
+                (preset["name"], preset["mode"], preset["quality"], preset["audio_bitrate"], preset["audio_format"]),
+            )
+        conn.commit()
+
+
+def get_all_presets() -> list[dict]:
+    with get_db_connection() as conn:
+        rows = conn.execute("SELECT name, mode, quality, audio_bitrate, audio_format FROM presets ORDER BY created_at").fetchall()
+        return [dict(row) for row in rows]
+
+
+def save_preset(name: str, mode: str, quality: str, audio_bitrate: str, audio_format: str) -> None:
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO presets (name, mode, quality, audio_bitrate, audio_format) VALUES (?, ?, ?, ?, ?)",
+            (name, mode, quality, audio_bitrate, audio_format),
+        )
+        conn.commit()
+
+
+def delete_preset(name: str) -> None:
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM presets WHERE name = ?", (name,))
+        conn.commit()
+
+
 # Initialize database schema on module load
 init_db()
+_ensure_default_presets()
