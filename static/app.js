@@ -998,19 +998,23 @@ analyzeForm.addEventListener("submit", async (event) => {
 });
 
 // Quick Download Handlers
-quickMp3Btn.addEventListener("click", () => {
-    downloadForm.elements.mode.value = "audio";
-    audioFormatSelect.value = "mp3";
-    audioBitrateSelect.value = "320";
-    syncMode();
-    downloadForm.requestSubmit();
-});
+if (quickMp3Btn) {
+    quickMp3Btn.addEventListener("click", () => {
+        downloadForm.elements.mode.value = "audio";
+        audioFormatSelect.value = "mp3";
+        audioBitrateSelect.value = "320";
+        syncMode();
+        downloadForm.requestSubmit();
+    });
+}
 
-quickMp4Btn.addEventListener("click", () => {
-    downloadForm.elements.mode.value = "video";
-    syncMode();
-    downloadForm.requestSubmit();
-});
+if (quickMp4Btn) {
+    quickMp4Btn.addEventListener("click", () => {
+        downloadForm.elements.mode.value = "video";
+        syncMode();
+        downloadForm.requestSubmit();
+    });
+}
 
 // Update Live Pipeline Checklist Items
 function updatePipelineChecklist(stage) {
