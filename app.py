@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import uuid
 import zipfile
 from io import BytesIO
@@ -162,6 +163,24 @@ def parse_time_seconds(time_str: str | None) -> int | None:
         return None
 
 
+def set_job(job_id: str, **kwargs) -> None:
+    with JOBS_LOCK:
+        job = JOBS.setdefault(job_id, {})
+        job.update(kwargs)
+        storage.save_job_record(
+            job_id,
+            status=job.get("status", "queued"),
+            stage=job.get("stage", "connecting"),
+            progress=job.get("progress"),
+            message=job.get("message", ""),
+            filename=job.get("filename"),
+            job_dir=str(job.get("job_dir")) if job.get("job_dir") else None,
+            path=str(job.get("path")) if job.get("path") else None,
+            error=job.get("error"),
+            failures=job.get("failures"),
+        )
+
+
 def build_options(
     job_dir: Path,
     mode: str,
@@ -177,19 +196,50 @@ def build_options(
     end_time: str | None = None,
     normalize_audio: bool = False,
     audio_effect: str = "none",
+    playlist_items: str | None = None,
+    sponsorblock: str | None = None,
+    mute_video: bool = False,
 ) -> dict:
-    output_template = str(
-        job_dir / "%(playlist_index&{} - |)s%(title).150B [%(id)s].%(ext)s"
-    )
+    if download_playlist:
+        out_path = str(job_dir / "%(playlist_index&{} - |)s%(title).150B [%(id)s].%(ext)s")
+    else:
+        out_path = str(job_dir / "%(title).200s [%(id)s].%(ext)s")
 
-    options: dict = {
-        "outtmpl": output_template,
+    options = {
+        "outtmpl": out_path,
         "noplaylist": not download_playlist,
-        "ignoreerrors": "only_download",
-        "overwrites": False,
+        "concurrent_fragment_downloads": 4,
+        "format": "bestvideo/best" if mute_video else "bestvideo+bestaudio/best",
         "quiet": True,
         "no_warnings": True,
-        "no_color": True,
+        "nocheckcertificate": True,
+        "extract_flat": False,
+        "socket_timeout": 30,
+        "retries": 3,
+        "fragment_retries": 3,
+        "ignoreerrors": True,
+    }
+
+    if sponsorblock == "remove":
+        options["postprocessors"] = [{
+            "key": "SponsorBlock",
+            "categories": ["sponsor", "intro", "outro", "selfpromo"],
+            "when": "after_filter"
+        }, {
+            "key": "ModifyChapters",
+            "remove_sponsor_segments": ["sponsor", "intro", "outro", "selfpromo"]
+        }]
+    elif sponsorblock == "mark":
+        options["postprocessors"] = [{
+            "key": "SponsorBlock",
+            "categories": ["sponsor", "intro", "outro", "selfpromo"],
+            "when": "after_filter"
+        }]
+
+    if playlist_items:
+        options["playlist_items"] = playlist_items
+        
+    options.update({
         "noprogress": True,
         "logger": JobLogger(job_id) if job_id else JobLogger("standalone"),
         "concurrent_fragment_downloads": 4,
@@ -207,7 +257,7 @@ def build_options(
             ),
             "Accept-Language": "en-US,en;q=0.9",
         },
-    }
+    })
 
     start_sec = parse_time_seconds(start_time)
     end_sec = parse_time_seconds(end_time)
@@ -282,7 +332,9 @@ def build_options(
         )
         return options
 
-    if quality == "best":
+    if mute_video:
+        video_format = "bestvideo/best" if quality == "best" else f"bv*[height<={quality}]/bestvideo/best"
+    elif quality == "best":
         video_format = "bv*+ba/b"
     else:
         video_format = f"bv*[height<={quality}]+ba/b[height<={quality}]/b"
@@ -398,6 +450,9 @@ def run_download(
     end_time: str | None = None,
     normalize_audio: bool = False,
     audio_effect: str = "none",
+    playlist_items: str | None = None,
+    sponsorblock: str | None = None,
+    mute_video: bool = False,
 ) -> None:
     try:
         set_job(job_id, status="starting", stage="connecting", message="Connecting to media source…")
@@ -416,6 +471,9 @@ def run_download(
             end_time=end_time,
             normalize_audio=normalize_audio,
             audio_effect=audio_effect,
+            playlist_items=playlist_items,
+            sponsorblock=sponsorblock,
+            mute_video=mute_video,
         )
         options["progress_hooks"] = [lambda data: update_progress(job_id, data)]
 
@@ -530,6 +588,18 @@ def video_details(info: dict) -> dict:
     else:
         platform = "youtube"
 
+    playlist_entries = []
+    if is_playlist and entries:
+        for idx, entry in enumerate(entries[:50], 1):
+            if entry:
+                playlist_entries.append({
+                    "index": idx,
+                    "id": entry.get("id"),
+                    "title": entry.get("title") or f"Item {idx}",
+                    "duration": entry.get("duration"),
+                    "thumbnail": entry.get("thumbnail"),
+                })
+
     resolution_cards = []
     for h in heights:
         if h >= 2160:
@@ -564,6 +634,7 @@ def video_details(info: dict) -> dict:
         "platform": platform,
         "qualities": [str(height) for height in heights],
         "resolution_cards": resolution_cards,
+        "playlist_entries": playlist_entries,
         "audio_bitrates": ["320", "192", "128"],
         "audio_formats": ["mp3", "m4a", "wav"],
         "subtitle_languages": subtitle_languages,
@@ -591,6 +662,79 @@ def search_youtube(query: str):
     return jsonify(is_search=True, results=results)
 
 
+from concurrent.futures import ThreadPoolExecutor
+
+WORKER_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mediadrop_worker")
+ALLOWED_BROWSERS = {"chrome", "edge", "firefox", "brave", "safari"}
+
+def run_job_async(func, *args):
+    if app.config.get("TESTING") or app.testing:
+        func(*args)
+    else:
+        WORKER_POOL.submit(func, *args)
+
+@app.after_request
+def apply_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data: https: http:; "
+        "media-src 'self' blob:; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com;"
+    )
+    return response
+
+
+@app.get("/api/diagnostics")
+def get_diagnostics():
+    ffmpeg_available = bool(shutil.which("ffmpeg"))
+    ffprobe_available = bool(shutil.which("ffprobe"))
+    node_available = bool(shutil.which("node"))
+    deno_available = bool(shutil.which("deno"))
+    
+    total, used, free = shutil.disk_usage(DOWNLOAD_ROOT)
+    free_mb = free // (1024 * 1024)
+
+    return jsonify({
+        "status": "ok",
+        "python_version": sys.version.split()[0],
+        "ytdlp_version": getattr(yt_dlp.version, "__version__", "unknown"),
+        "ffmpeg_available": ffmpeg_available,
+        "ffprobe_available": ffprobe_available,
+        "node_available": node_available,
+        "deno_available": deno_available,
+        "free_space_mb": free_mb,
+        "capabilities": {
+            "can_merge_video": ffmpeg_available,
+            "can_convert_audio": ffmpeg_available,
+            "can_make_gif": ffmpeg_available,
+            "can_solve_youtube_js": node_available or deno_available,
+        }
+    })
+
+
+import socket
+
+@app.get("/api/lan_info")
+def get_lan_info():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        local_ip = "127.0.0.1"
+
+    return jsonify({
+        "local_ip": local_ip,
+        "port": 5000,
+        "lan_url": f"http://{local_ip}:5000",
+    })
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
@@ -600,6 +744,11 @@ def index():
 def media_info():
     data = request.get_json(silent=True) or {}
     url = str(data.get("url", "")).strip()
+    browser_cookie = str(data.get("cookies_from_browser") or "").strip().lower()
+
+    cookies_tuple = None
+    if browser_cookie and browser_cookie in ALLOWED_BROWSERS:
+        cookies_tuple = (browser_cookie,)
 
     if not is_valid_youtube_url(url):
         if url and not url.startswith("http://") and not url.startswith("https://"):
@@ -615,6 +764,7 @@ def media_info():
             "video",
             "best",
             False,
+            cookies_from_browser=cookies_tuple,
         )
         options["extract_flat"] = "in_playlist"
         with yt_dlp.YoutubeDL(options) as downloader:
@@ -643,9 +793,25 @@ def start_download():
     subtitle_language = str(data.get("subtitle_language") or "").strip()
     normalize_audio = data.get("normalize_audio") is True
     audio_effect = str(data.get("audio_effect") or "none")
+    sponsorblock = str(data.get("sponsorblock") or "").strip() or None
+    mute_video = data.get("mute_video") is True
+    browser_cookie = str(data.get("cookies_from_browser") or "").strip().lower()
+    cookies_tuple = (browser_cookie,) if browser_cookie in ALLOWED_BROWSERS else None
+
+    items_to_download = data.get("items_to_download")
+    playlist_items = None
+    if items_to_download and isinstance(items_to_download, list):
+        playlist_items = ",".join(str(idx) for idx in items_to_download)
+    elif data.get("playlist_items"):
+        playlist_items = str(data.get("playlist_items"))
 
     if not is_valid_youtube_url(url):
         return jsonify(error="Enter a valid YouTube or YouTube Music URL."), 400
+
+    start_sec = parse_time_seconds(start_time)
+    end_sec = parse_time_seconds(end_time)
+    if start_sec is not None and end_sec is not None and start_sec >= end_sec:
+        return jsonify(error="Start clip time must be less than end clip time."), 400
 
     if mode not in {"video", "audio", "gif"}:
         return jsonify(error="Invalid download type."), 400
@@ -669,33 +835,34 @@ def start_download():
     with JOBS_LOCK:
         JOBS[job_id] = {
             "status": "queued",
+            "stage": "connecting",
             "progress": 0,
             "message": "Queued…",
             "job_dir": job_dir,
             "failures": [],
         }
 
-    Thread(
-        target=run_download,
-        args=(
-            job_id,
-            job_dir,
-            url,
-            mode,
-            quality,
-            download_playlist,
-            None,
-            include_subtitles,
-            subtitle_language or None,
-            audio_bitrate,
-            audio_format,
-            start_time,
-            end_time,
-            normalize_audio,
-            audio_effect,
-        ),
-        daemon=True,
-    ).start()
+    run_job_async(
+        run_download,
+        job_id,
+        job_dir,
+        url,
+        mode,
+        quality,
+        download_playlist,
+        cookies_tuple,
+        include_subtitles,
+        subtitle_language or None,
+        audio_bitrate,
+        audio_format,
+        start_time,
+        end_time,
+        normalize_audio,
+        audio_effect,
+        playlist_items,
+        sponsorblock,
+        mute_video,
+    )
     return jsonify(job_id=job_id), 202
 
 
@@ -755,33 +922,21 @@ def run_batch_download(
 ) -> None:
     try:
         total = len(urls)
-        set_job(job_id, status="starting", message=f"Starting batch process ({total} items)…")
+        set_job(job_id, status="starting", stage="connecting", message=f"Starting batch process ({total} items)…")
         
         for idx, url in enumerate(urls, 1):
             ensure_not_cancelled(job_id)
-            set_job(
-                job_id,
-                status="downloading",
-                progress=round(((idx - 1) / total) * 100, 1),
-                message=f"Downloading batch item {idx} of {total}…",
-            )
             try:
-                options = build_options(
-                    job_dir,
-                    mode,
-                    quality,
-                    False,
-                    audio_bitrate=audio_bitrate,
-                    audio_format=audio_format,
-                    job_id=job_id,
-                )
+                set_job(job_id, status="downloading", stage="downloading", message=f"Downloading item {idx} of {total}…")
+                options = build_options(job_dir, mode, quality, False, audio_bitrate=audio_bitrate, audio_format=audio_format, job_id=job_id)
+                options["progress_hooks"] = [lambda d: update_progress(job_id, d)]
                 with yt_dlp.YoutubeDL(options) as downloader:
                     downloader.download([url])
             except Exception as exc:
-                clean = friendly_error(exc)
                 with JOBS_LOCK:
-                    if job := JOBS.get(job_id):
-                        job.setdefault("failures", []).append({"message": url, "reason": clean})
+                    failures = JOBS.get(job_id, {}).get("failures") or []
+                    failures.append({"url": url, "reason": friendly_error(exc), "message": f"Item {idx}"})
+                    JOBS[job_id]["failures"] = failures
 
         ensure_not_cancelled(job_id)
         files = collect_finished_files(job_dir)
@@ -791,11 +946,11 @@ def run_batch_download(
         if not files:
             if failures:
                 raise RuntimeError(failures[0]["reason"])
-            raise RuntimeError("No files were downloaded in batch.")
+            raise RuntimeError("No downloadable file was produced in batch.")
 
         if len(files) > 1:
-            set_job(job_id, status="processing", message="Packaging batch ZIP archive…")
-            output_path = make_zip(job_dir, files, title="batch-download")
+            set_job(job_id, status="processing", stage="packaging", message="Creating ZIP archive for batch…")
+            output_path = make_zip(job_dir, files, title="batch_downloads")
         else:
             output_path = files[0]
 
@@ -806,6 +961,7 @@ def run_batch_download(
         set_job(
             job_id,
             status="ready",
+            stage="ready",
             progress=100,
             filename=output_path.name,
             path=output_path,
@@ -816,12 +972,12 @@ def run_batch_download(
         )
     except JobCancelled:
         shutil.rmtree(job_dir, ignore_errors=True)
-        set_job(job_id, status="canceled", message="Batch download canceled.", progress=0)
+        set_job(job_id, status="canceled", stage="canceled", message="Batch download canceled.", progress=0)
     except Exception as exc:
         shutil.rmtree(job_dir, ignore_errors=True)
         with JOBS_LOCK:
             failures = JOBS.get(job_id, {}).get("failures") or []
-        set_job(job_id, status="error", message="Batch download failed.", error=friendly_error(exc), failures=failures)
+        set_job(job_id, status="error", stage="error", message="Batch download failed.", error=friendly_error(exc), failures=failures)
 
 
 @app.post("/api/batch_jobs")
@@ -846,17 +1002,14 @@ def start_batch_download():
     with JOBS_LOCK:
         JOBS[job_id] = {
             "status": "queued",
+            "stage": "connecting",
             "progress": 0,
             "message": "Queued batch…",
             "job_dir": job_dir,
             "failures": [],
         }
 
-    Thread(
-        target=run_batch_download,
-        args=(job_id, job_dir, valid_urls[:10], mode, quality, audio_bitrate, audio_format),
-        daemon=True,
-    ).start()
+    run_job_async(run_batch_download, job_id, job_dir, valid_urls[:10], mode, quality, audio_bitrate, audio_format)
     return jsonify(job_id=job_id, count=len(valid_urls[:10])), 202
 
 
@@ -869,6 +1022,7 @@ def job_status(job_id: str):
                 key: job.get(key)
                 for key in (
                     "status",
+                    "stage",
                     "progress",
                     "message",
                     "downloaded_bytes",
@@ -920,20 +1074,11 @@ def download_file(job_id: str):
         return jsonify(error="The file is not ready yet."), 409
 
     output_path = Path(job["path"])
-    job_dir = Path(job["job_dir"])
     response = send_file(
         output_path,
         as_attachment=True,
         download_name=output_path.name,
     )
-    response.direct_passthrough = False
-
-    def remove_job_files():
-        shutil.rmtree(job_dir, ignore_errors=True)
-        with JOBS_LOCK:
-            JOBS.pop(job_id, None)
-
-    response.call_on_close(remove_job_files)
     return response
 
 

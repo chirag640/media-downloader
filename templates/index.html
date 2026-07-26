@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MediaDrop — Free 4K Media Downloader & Converter</title>
     <meta name="description" content="Universal high-speed free downloader for YouTube, Instagram Reels, TikTok, Twitter/X, and Soundcloud.">
+    <meta name="theme-color" content="#6366f1">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,10 +48,61 @@
                 <h4>📝 AI Transcript & Captions</h4>
                 <button id="close-transcript-btn" class="btn-clear" type="button">✕</button>
             </div>
-            <div class="transcript-body">
+            <div class="modal-body">
+                <input id="transcript-search-input" type="search" class="history-search-box" placeholder="🔍 Search transcript keywords..." style="margin-bottom:8px;">
                 <textarea id="transcript-textarea" readonly rows="12" placeholder="Extracting transcript..."></textarea>
                 <div class="transcript-actions">
                     <button id="copy-transcript-btn" class="btn-primary" type="button">Copy to Clipboard (AI Prompt)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagnostics Dependency Modal -->
+    <div id="diagnostics-modal" class="modal-overlay" hidden>
+        <div class="modal-card modal-large">
+            <div class="modal-head">
+                <h4>🛠️ System Diagnostics & Dependency Center</h4>
+                <button id="close-diagnostics-btn" class="btn-clear" type="button">✕</button>
+            </div>
+            <div class="diagnostics-body">
+                <div class="diag-grid">
+                    <div class="diag-card">
+                        <span class="diag-lbl">FFmpeg Engine</span>
+                        <strong id="diag-ffmpeg" class="diag-val">—</strong>
+                    </div>
+                    <div class="diag-card">
+                        <span class="diag-lbl">ffprobe Detector</span>
+                        <strong id="diag-ffprobe" class="diag-val">—</strong>
+                    </div>
+                    <div class="diag-card">
+                        <span class="diag-lbl">Node.js Runtime</span>
+                        <strong id="diag-node" class="diag-val">—</strong>
+                    </div>
+                    <div class="diag-card">
+                        <span class="diag-lbl">yt-dlp Engine</span>
+                        <strong id="diag-ytdlp" class="diag-val">—</strong>
+                    </div>
+                    <div class="diag-card">
+                        <span class="diag-lbl">Disk Free Space</span>
+                        <strong id="diag-disk" class="diag-val">—</strong>
+                    </div>
+                </div>
+
+                <div id="ffmpeg-warning-banner" class="alert-banner warning-banner" hidden>
+                    <span class="alert-icon">⚠️</span>
+                    <div>
+                        <strong>FFmpeg is missing from your system PATH</strong>
+                        <p style="font-size:12px; margin-top:4px;">Video merging, audio conversion, and GIF generation are disabled until FFmpeg is installed.</p>
+                        <details style="margin-top:6px; font-size:11px;">
+                            <summary style="cursor:pointer; color:#fbbf24;">Windows Installation Guide</summary>
+                            <code style="display:block; background:rgba(0,0,0,0.3); padding:6px; border-radius:4px; margin-top:4px;">winget install Gyan.FFmpeg</code>
+                        </details>
+                    </div>
+                </div>
+
+                <div class="transcript-actions" style="margin-top:16px;">
+                    <button id="refresh-diagnostics-btn" class="btn-secondary" type="button">Re-check System Status</button>
                 </div>
             </div>
         </div>
@@ -62,18 +115,12 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </div>
                 <span class="brand-title">MediaDrop</span>
-                <span id="health-status-badge" class="brand-badge badge-green">🟢 100% Free & Unlimited</span>
-            </div>
-
-            <div class="nav-center-hint">
-                <kbd class="kbd-key">⌘V</kbd>
-                <span>Paste link anywhere to analyze</span>
             </div>
 
             <div class="nav-controls">
-                <a id="bookmarklet-btn" class="btn-subtle bookmarklet-pill" href="javascript:(function(){window.open('http://127.0.0.1:5000/?url='+encodeURIComponent(location.href));})();" title="Drag this button to your Bookmarks Bar for 1-click downloads">
-                    <span>⚡ Bookmarks Tool</span>
-                </a>
+                <button id="open-diagnostics-btn" class="btn-subtle" type="button" title="System Diagnostics & Dependencies">
+                    <span>🛠️ System Info</span>
+                </button>
                 <button id="theme-toggle-btn" class="btn-subtle" type="button" title="Toggle Light/Dark Theme">
                     <span id="theme-icon">🌙</span>
                     <span id="theme-label">Dark</span>
@@ -88,12 +135,8 @@
 
         <main>
             <section class="hero-block">
-                <div class="status-pill">
-                    <span class="indicator-dot"></span>
-                    <span id="ffmpeg-status-txt">FFmpeg Ready • 10x Fast Fragment Engine</span>
-                </div>
-                <h1>Universal Downloader <br><span class="gradient-headline">100% Free Media Studio</span></h1>
-                <p class="hero-desc">Convert and save 4K video, Reels, audio tracks & playlists from YouTube, Instagram, TikTok, Twitter/X, and Soundcloud for free.</p>
+                <h1>Universal Media Downloader <br><span class="gradient-headline">Clean & Fast Studio</span></h1>
+                <p class="hero-desc">Convert and save 4K video, Reels, audio tracks & playlists from YouTube, Instagram, TikTok, Twitter/X, and Soundcloud.</p>
             </section>
 
             <!-- Main Input Panel -->
@@ -114,12 +157,11 @@
                                 id="url"
                                 name="url"
                                 type="text"
-                                placeholder="Paste link (YouTube, Instagram, TikTok, X) OR type search terms..."
+                                placeholder="Paste link (YouTube, Instagram, TikTok, X) or type search keywords..."
                                 autocomplete="off"
                                 required
                                 autofocus
                             >
-                            <kbd class="field-shortcut-hint">Ctrl+V</kbd>
                             <button id="clear-button" class="btn-clear" type="button" title="Clear input" hidden>✕</button>
                         </div>
                         <div class="action-row">
@@ -315,14 +357,48 @@
                                 </div>
 
                                 <div class="ctrl-cell check-cell">
-                                    <label class="check-box-label">
-                                        <input id="playlist" type="checkbox">
-                                        <span class="check-indicator"></span>
-                                        <div>
-                                            <strong>Full Playlist</strong>
-                                            <small>Bundled into Playlist Title folder</small>
-                                        </div>
-                                    </label>
+                                <label class="check-box-label">
+                                    <input id="playlist" type="checkbox">
+                                    <span class="check-indicator"></span>
+                                    <div>
+                                        <strong>Full Playlist</strong>
+                                        <small>Bundled into Playlist Title folder</small>
+                                    </div>
+                                </label>
+                            </div>
+
+                            <!-- Selective Playlist Item Picker Container -->
+                            <div id="playlist-picker-container" class="playlist-picker-box" hidden>
+                                <div class="picker-head">
+                                    <strong>📋 Select Items to Convert (<span id="selected-item-count">0</span>)</strong>
+                                    <div class="picker-actions">
+                                        <button id="select-all-btn" class="btn-ghost" type="button">All</button>
+                                        <button id="deselect-all-btn" class="btn-ghost" type="button">None</button>
+                                    </div>
+                                </div>
+                                <div id="playlist-items-list" class="playlist-items-list"></div>
+                            </div>
+                        </div>
+
+                            <!-- SponsorBlock, Mute Video & Cookies Controls -->
+                            <div class="controls-grid sub-grid" style="margin-top:10px;">
+                                <div class="ctrl-cell">
+                                    <label for="sponsorblock">SponsorBlock (YouTube)</label>
+                                    <select id="sponsorblock">
+                                        <option value="">Disabled</option>
+                                        <option value="remove">Remove Sponsor Segments</option>
+                                        <option value="mark">Mark Chapters Only</option>
+                                    </select>
+                                </div>
+                                <div class="ctrl-cell">
+                                    <label for="cookies-browser">Browser Cookies (Private Media)</label>
+                                    <select id="cookies-browser" name="cookies_from_browser">
+                                        <option value="" selected>None (Public Media)</option>
+                                        <option value="chrome">Chrome</option>
+                                        <option value="edge">Edge</option>
+                                        <option value="firefox">Firefox</option>
+                                        <option value="brave">Brave</option>
+                                    </select>
                                 </div>
                             </div>
 
@@ -460,7 +536,6 @@
                 </div>
             </section>
 
-            <!-- Download History Section -->
             <section id="history-section" class="card history-card" hidden>
                 <div class="card-head">
                     <h3>Recent Downloads</h3>
@@ -468,6 +543,9 @@
                         <button id="purge-disk-btn" class="btn-ghost" type="button" title="Purge downloaded files from disk storage">🧹 Purge Disk Storage</button>
                         <button id="clear-history-btn" class="btn-ghost" type="button">Clear History</button>
                     </div>
+                </div>
+                <div class="history-search-row" style="margin-bottom:12px;">
+                    <input id="history-search-input" type="search" class="history-search-box" placeholder="🔍 Search recent downloads by title or creator...">
                 </div>
                 <div id="history-list" class="history-grid"></div>
                 <p id="empty-history-msg" class="empty-txt">No downloads saved in local history yet.</p>

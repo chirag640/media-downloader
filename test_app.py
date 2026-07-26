@@ -94,6 +94,8 @@ class FakeThumbnailResponse:
 
 class AppTest(unittest.TestCase):
     def setUp(self):
+        app.app.config["TESTING"] = True
+        app.app.testing = True
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_download_root = app.DOWNLOAD_ROOT
         app.DOWNLOAD_ROOT = Path(self.temp_dir.name)
@@ -306,10 +308,16 @@ class AppTest(unittest.TestCase):
         self.assertEqual(status["status"], "ready")
         self.assertEqual(status["filename"], "video.mp4")
 
+        # File request is non-destructive for audio preview / repeated downloads
         response = self.client.get(f"/api/jobs/{job_id}/file")
         self.assertEqual(response.data, b"video")
         response.close()
-        self.assertEqual(self.client.get(f"/api/jobs/{job_id}").status_code, 404)
+
+        # Job remains intact after preview
+        self.assertEqual(self.client.get(f"/api/jobs/{job_id}").status_code, 200)
+
+        # Explicit clean_downloads purges ready job files
+        self.client.post("/api/clean_downloads")
         self.assertEqual(list(app.DOWNLOAD_ROOT.iterdir()), [])
 
     def test_playlist_zip_and_cleanup(self):
@@ -320,6 +328,9 @@ class AppTest(unittest.TestCase):
             self.assertIn("media-download/one.mp4", archive.namelist())
             self.assertEqual(archive.read("media-download/one.mp4"), b"one")
         response.close()
+
+        # Explicit clean_downloads purges ready playlist files
+        self.client.post("/api/clean_downloads")
         self.assertEqual(list(app.DOWNLOAD_ROOT.iterdir()), [])
 
     def test_multi_platform_url_validation(self):
@@ -357,6 +368,79 @@ class AppTest(unittest.TestCase):
             {"url": "https://invalid-host.com/video"},
         )
         self.assertEqual(transcript_res.status_code, 400)
+
+    def test_diagnostics_security_headers_and_stage(self):
+        res = self.client.get("/api/diagnostics")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["status"], "ok")
+        self.assertIn("capabilities", data)
+        self.assertIn("Content-Security-Policy", res.headers)
+        self.assertIn("X-Content-Type-Options", res.headers)
+
+        job_id = self.start_job()
+        status_res = self.client.get(f"/api/jobs/{job_id}")
+        self.assertEqual(status_res.status_code, 200)
+        status_data = status_res.get_json()
+        self.assertIn("stage", status_data)
+
+    def test_storage_sqlite_and_selective_playlist(self):
+        import storage
+        storage.save_job_record("test1234", "ready", "ready", 100.0, "Complete", "file.mp4")
+        rec = storage.get_job_record("test1234")
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec["status"], "ready")
+
+        opts = app.build_options(app.DOWNLOAD_ROOT, "video", "best", True, playlist_items="1,3,5")
+        self.assertEqual(opts["playlist_items"], "1,3,5")
+
+    def test_clip_time_validation_and_history_search(self):
+        # Clip validation test: start_time >= end_time returns 400
+        invalid_clip_res = self.post_json(
+            "/api/jobs",
+            {
+                "url": "https://youtu.be/example",
+                "mode": "video",
+                "start_time": "00:10:00",
+                "end_time": "00:05:00",
+            },
+        )
+        self.assertEqual(invalid_clip_res.status_code, 400)
+        self.assertIn("Start clip time must be less than end clip time", invalid_clip_res.get_json()["error"])
+
+        # History search query test
+        import storage
+        storage.save_history_item({
+            "id": "item1",
+            "title": "Python Tutorial",
+            "uploader": "CodeChannel",
+            "thumbnail": "http://example.com/thumb.jpg",
+            "filename": "video.mp4",
+            "url": "https://youtu.be/example",
+            "timestamp": "12:00",
+        })
+        items = storage.get_history_items(query="Python")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["title"], "Python Tutorial")
+
+    def test_lan_info_and_sponsorblock_options(self):
+        lan_res = self.client.get("/api/lan_info")
+        self.assertEqual(lan_res.status_code, 200)
+        data = lan_res.get_json()
+        self.assertIn("local_ip", data)
+        self.assertIn("lan_url", data)
+
+        opts_sb = app.build_options(app.DOWNLOAD_ROOT, "video", "720", False, sponsorblock="remove", mute_video=True)
+        self.assertIn("bestvideo", opts_sb["format"])
+        self.assertIn("postprocessors", opts_sb)
+
+    def test_pwa_manifest_and_sw(self):
+        manifest_res = self.client.get("/static/manifest.json")
+        self.assertEqual(manifest_res.status_code, 200)
+        self.assertIn("MediaDrop", manifest_res.get_json()["name"])
+
+        sw_res = self.client.get("/static/sw.js")
+        self.assertEqual(sw_res.status_code, 200)
 
     def test_download_error_cleanup(self):
         FakeYoutubeDL.error = DownloadError("unavailable")

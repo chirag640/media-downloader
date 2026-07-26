@@ -8,6 +8,17 @@ const themeLabel = document.getElementById("theme-label");
 const healthStatusBadge = document.getElementById("health-status-badge");
 const ffmpegStatusTxt = document.getElementById("ffmpeg-status-txt");
 
+const openDiagnosticsBtn = document.getElementById("open-diagnostics-btn");
+const closeDiagnosticsBtn = document.getElementById("close-diagnostics-btn");
+const refreshDiagnosticsBtn = document.getElementById("refresh-diagnostics-btn");
+const diagnosticsModal = document.getElementById("diagnostics-modal");
+const diagFfmpeg = document.getElementById("diag-ffmpeg");
+const diagFfprobe = document.getElementById("diag-ffprobe");
+const diagNode = document.getElementById("diag-node");
+const diagYtdlp = document.getElementById("diag-ytdlp");
+const diagDisk = document.getElementById("diag-disk");
+const ffmpegWarningBanner = document.getElementById("ffmpeg-warning-banner");
+
 const qrModal = document.getElementById("qr-modal");
 const openQrBtn = document.getElementById("open-qr-btn");
 const closeQrBtn = document.getElementById("close-qr-btn");
@@ -29,6 +40,7 @@ const downloadButton = document.getElementById("download-button");
 const batchButton = document.getElementById("batch-button");
 const urlInput = document.getElementById("url");
 const batchUrlsTextarea = document.getElementById("batch-urls");
+const cookiesBrowserSelect = document.getElementById("cookies-browser");
 
 const modeSingleBtn = document.getElementById("mode-single-btn");
 const modeBatchBtn = document.getElementById("mode-batch-btn");
@@ -39,6 +51,12 @@ const searchResultsGrid = document.getElementById("search-results-grid");
 
 const previewSection = document.getElementById("preview-section");
 const resolutionGrid = document.getElementById("resolution-grid");
+
+const playlistPickerContainer = document.getElementById("playlist-picker-container");
+const selectedItemCountSpan = document.getElementById("selected-item-count");
+const selectAllBtn = document.getElementById("select-all-btn");
+const deselectAllBtn = document.getElementById("deselect-all-btn");
+const playlistItemsList = document.getElementById("playlist-items-list");
 
 const progressSection = document.getElementById("progress-section");
 const historySection = document.getElementById("history-section");
@@ -99,20 +117,50 @@ const quickMp3Btn = document.getElementById("quick-mp3-btn");
 const quickMp4Btn = document.getElementById("quick-mp4-btn");
 const thumbnailDownloadBtn = document.getElementById("thumbnail-download-btn");
 
-// App State
+// PWA Service Worker & Notification Setup
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/static/sw.js").catch(() => {});
+    });
+}
+
+function sendDesktopNotification(title, body) {
+    if ("Notification" in window && Notification.permission === "granted") {
+        try {
+            new Notification(title, { body: body, icon: "/static/manifest.json" });
+        } catch {}
+    }
+}
+
+function requestNotificationPermission() {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+}
 let currentUrl = "";
 let currentJobId = null;
 let currentMediaInfo = null;
 let currentFileDownloadUrl = "";
 let isBatchMode = false;
+let systemDiagnostics = null;
+let currentPlaylistEntries = [];
+let selectedPlaylistIndices = new Set();
 
-// Toast Notification Manager
+// Toast Notification Manager (100% Safe DOM rendering)
 function showToast(message, type = "info") {
     const toast = document.createElement("div");
     toast.className = `toast toast-${type}`;
-    const icon = type === "error" ? "⚠️" : type === "success" ? "✓" : "ℹ️";
-    toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+    
+    const iconSpan = document.createElement("span");
+    iconSpan.textContent = type === "error" ? "⚠️" : type === "success" ? "✓" : "ℹ️";
+    
+    const msgSpan = document.createElement("span");
+    msgSpan.textContent = message;
+    
+    toast.appendChild(iconSpan);
+    toast.appendChild(msgSpan);
     toastContainer.appendChild(toast);
+    
     setTimeout(() => {
         toast.style.opacity = "0";
         toast.style.transform = "translateY(-10px)";
@@ -120,10 +168,58 @@ function showToast(message, type = "info") {
     }, 3500);
 }
 
-// QR Code Generator Modal
-openQrBtn.addEventListener("click", () => {
+// Diagnostics & Health Center
+async function checkDiagnostics() {
+    try {
+        const response = await fetch("/api/diagnostics");
+        const data = await response.json();
+        systemDiagnostics = data;
+
+        diagFfmpeg.textContent = data.ffmpeg_available ? "🟢 Ready" : "🔴 Missing";
+        diagFfprobe.textContent = data.ffprobe_available ? "🟢 Ready" : "🔴 Missing";
+        diagNode.textContent = data.node_available ? "🟢 Ready" : "⚪ Optional";
+        diagYtdlp.textContent = `v${data.ytdlp_version}`;
+        diagDisk.textContent = `${data.free_space_mb || 0} MB`;
+
+        ffmpegWarningBanner.hidden = data.ffmpeg_available;
+
+        if (data.ffmpeg_available) {
+            if (healthStatusBadge) healthStatusBadge.textContent = "🟢 Local Studio";
+            if (ffmpegStatusTxt) ffmpegStatusTxt.textContent = `FFmpeg Ready • ${data.free_space_mb} MB Free`;
+        } else {
+            if (healthStatusBadge) healthStatusBadge.textContent = "🟡 Native Mode (No FFmpeg)";
+            if (ffmpegStatusTxt) ffmpegStatusTxt.textContent = "FFmpeg Missing • Single Stream Only";
+        }
+    } catch {
+        if (healthStatusBadge) healthStatusBadge.textContent = "🔴 Offline Mode";
+    }
+}
+checkDiagnostics();
+
+openDiagnosticsBtn.addEventListener("click", () => {
+    checkDiagnostics();
+    diagnosticsModal.hidden = false;
+});
+closeDiagnosticsBtn.addEventListener("click", () => {
+    diagnosticsModal.hidden = true;
+});
+refreshDiagnosticsBtn.addEventListener("click", () => {
+    checkDiagnostics();
+    showToast("Re-checked system diagnostics", "info");
+});
+
+// QR Code Generator Modal (Local LAN / Mobile)
+openQrBtn.addEventListener("click", async () => {
     if (!currentFileDownloadUrl) return;
-    const fullUrl = window.location.origin + currentFileDownloadUrl;
+    
+    let baseUrl = window.location.origin;
+    try {
+        const lanRes = await fetch("/api/lan_info");
+        const lanData = await lanRes.json();
+        if (lanData.lan_url) baseUrl = lanData.lan_url;
+    } catch {}
+
+    const fullUrl = baseUrl + currentFileDownloadUrl;
     qrCodeContainer.replaceChildren();
     
     const qrImg = document.createElement("img");
@@ -138,12 +234,30 @@ closeQrBtn.addEventListener("click", () => {
     qrModal.hidden = true;
 });
 
+let rawTranscriptText = "";
+const transcriptSearchInput = document.getElementById("transcript-search-input");
+
+if (transcriptSearchInput) {
+    transcriptSearchInput.addEventListener("input", () => {
+        const query = transcriptSearchInput.value.toLowerCase().trim();
+        if (!query) {
+            transcriptTextarea.value = rawTranscriptText;
+            return;
+        }
+        const filteredLines = rawTranscriptText
+            .split("\n")
+            .filter(line => line.toLowerCase().includes(query));
+        transcriptTextarea.value = filteredLines.join("\n") || "No matching transcript lines found.";
+    });
+}
+
 // AI Transcript Modal & Exporter
 openTranscriptBtn.addEventListener("click", async () => {
     if (!currentUrl) return;
     transcriptModal.hidden = false;
     transcriptTextarea.value = "Extracting transcript from video...";
     copyTranscriptBtn.disabled = true;
+    if (transcriptSearchInput) transcriptSearchInput.value = "";
 
     try {
         const response = await fetch("/api/transcript", {
@@ -152,7 +266,8 @@ openTranscriptBtn.addEventListener("click", async () => {
             body: JSON.stringify({ url: currentUrl }),
         });
         const data = await readResponse(response);
-        transcriptTextarea.value = data.transcript || "No transcript available.";
+        rawTranscriptText = data.transcript || "No transcript available.";
+        transcriptTextarea.value = rawTranscriptText;
         copyTranscriptBtn.disabled = false;
     } catch (err) {
         transcriptTextarea.value = `Could not extract transcript: ${err.message}`;
@@ -194,7 +309,6 @@ themeToggleBtn.addEventListener("click", () => {
     showToast(`Switched to ${newTheme.toUpperCase()} theme`, "info");
 });
 
-// Initialize Theme from localStorage
 applyTheme(localStorage.getItem(THEME_KEY) || "dark");
 
 // Drag & Drop Link Overlay Handler
@@ -256,25 +370,6 @@ document.addEventListener("paste", async (event) => {
         }
     }
 });
-
-// System Health Check on Load
-async function checkHealth() {
-    try {
-        const response = await fetch("/api/health");
-        const health = await response.json();
-        if (health.status === "ok") {
-            healthStatusBadge.textContent = "🟢 100% Free & Unlimited";
-            if (health.ffmpeg_available) {
-                ffmpegStatusTxt.textContent = `FFmpeg Ready • ${health.free_space_mb || 0} MB Storage Available`;
-            } else {
-                ffmpegStatusTxt.textContent = "Native Mode • FFmpeg Not Installed";
-            }
-        }
-    } catch {
-        healthStatusBadge.textContent = "🟡 Offline Mode";
-    }
-}
-checkHealth();
 
 // Single vs Batch Mode Switcher
 modeSingleBtn.addEventListener("click", () => {
@@ -373,7 +468,7 @@ pasteButton.addEventListener("click", async () => {
     }
 });
 
-// Render Search Results Grid
+// Render Search Results Grid (100% Safe DOM rendering)
 function renderSearchResults(results) {
     searchResultsGrid.replaceChildren();
     searchResultsSection.hidden = false;
@@ -382,26 +477,110 @@ function renderSearchResults(results) {
     for (const item of results) {
         const card = document.createElement("div");
         card.className = "search-card";
-        card.innerHTML = `
-            <img class="search-thumb" src="${item.thumbnail}" alt="${item.title}">
-            <div class="search-info">
-                <div class="search-title">${item.title}</div>
-                <div class="search-meta">${item.uploader} • ${formatDuration(item.duration)}</div>
-                <button class="search-btn" type="button">Select & Convert</button>
-            </div>
-        `;
-        card.querySelector(".search-btn").addEventListener("click", () => {
+
+        const img = document.createElement("img");
+        img.className = "search-thumb";
+        img.src = item.thumbnail || "";
+        img.alt = item.title || "";
+
+        const info = document.createElement("div");
+        info.className = "search-info";
+
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "search-title";
+        titleDiv.textContent = item.title || "Untitled";
+
+        const metaDiv = document.createElement("div");
+        metaDiv.className = "search-meta";
+        metaDiv.textContent = `${item.uploader || 'Creator'} • ${formatDuration(item.duration)}`;
+
+        const btn = document.createElement("button");
+        btn.className = "search-btn";
+        btn.type = "button";
+        btn.textContent = "Select & Convert";
+
+        btn.addEventListener("click", () => {
             urlInput.value = item.url;
             clearButton.hidden = false;
             searchResultsSection.hidden = true;
             analyzeForm.requestSubmit();
         });
+
+        info.appendChild(titleDiv);
+        info.appendChild(metaDiv);
+        info.appendChild(btn);
+
+        card.appendChild(img);
+        card.appendChild(info);
+
         searchResultsGrid.appendChild(card);
     }
     searchResultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// Render Resolution Cards Grid
+// Render Selective Playlist Item Picker (100% Safe DOM rendering)
+function renderPlaylistPicker(entries) {
+    currentPlaylistEntries = entries || [];
+    selectedPlaylistIndices = new Set(currentPlaylistEntries.map(e => e.index));
+    playlistItemsList.replaceChildren();
+
+    if (!currentPlaylistEntries.length) {
+        playlistPickerContainer.hidden = true;
+        return;
+    }
+
+    playlistPickerContainer.hidden = false;
+    updateSelectedCount();
+
+    currentPlaylistEntries.forEach(entry => {
+        const row = document.createElement("label");
+        row.className = "playlist-item-row";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = true;
+        checkbox.addEventListener("change", () => {
+            if (checkbox.checked) {
+                selectedPlaylistIndices.add(entry.index);
+            } else {
+                selectedPlaylistIndices.delete(entry.index);
+            }
+            updateSelectedCount();
+        });
+
+        const titleSpan = document.createElement("span");
+        titleSpan.className = "playlist-item-title";
+        titleSpan.textContent = `${entry.index}. ${entry.title}`;
+
+        const durationSpan = document.createElement("span");
+        durationSpan.className = "playlist-item-duration";
+        durationSpan.textContent = formatDuration(entry.duration);
+
+        row.appendChild(checkbox);
+        row.appendChild(titleSpan);
+        row.appendChild(durationSpan);
+
+        playlistItemsList.appendChild(row);
+    });
+}
+
+function updateSelectedCount() {
+    selectedItemCountSpan.textContent = `${selectedPlaylistIndices.size} of ${currentPlaylistEntries.length}`;
+}
+
+selectAllBtn.addEventListener("click", () => {
+    selectedPlaylistIndices = new Set(currentPlaylistEntries.map(e => e.index));
+    playlistItemsList.querySelectorAll("input[type=checkbox]").forEach(cb => cb.checked = true);
+    updateSelectedCount();
+});
+
+deselectAllBtn.addEventListener("click", () => {
+    selectedPlaylistIndices.clear();
+    playlistItemsList.querySelectorAll("input[type=checkbox]").forEach(cb => cb.checked = false);
+    updateSelectedCount();
+});
+
+// Render Resolution Cards Grid (100% Safe DOM rendering)
 function renderResolutionCards(cards) {
     resolutionGrid.replaceChildren();
     if (!cards || !cards.length) return;
@@ -409,13 +588,27 @@ function renderResolutionCards(cards) {
     cards.forEach((cardData, idx) => {
         const card = document.createElement("div");
         card.className = `res-card ${idx === 0 ? 'active' : ''}`;
-        card.innerHTML = `
-            <div class="res-card-left">
-                <span class="res-icon">${cardData.icon || '▶'}</span>
-                <span class="res-label">${cardData.label}</span>
-            </div>
-            <span class="res-badge">${cardData.badge || 'HD'}</span>
-        `;
+
+        const leftDiv = document.createElement("div");
+        leftDiv.className = "res-card-left";
+
+        const iconSpan = document.createElement("span");
+        iconSpan.className = "res-icon";
+        iconSpan.textContent = cardData.icon || "▶";
+
+        const labelSpan = document.createElement("span");
+        labelSpan.className = "res-label";
+        labelSpan.textContent = cardData.label || "HD";
+
+        leftDiv.appendChild(iconSpan);
+        leftDiv.appendChild(labelSpan);
+
+        const badgeSpan = document.createElement("span");
+        badgeSpan.className = "res-badge";
+        badgeSpan.textContent = cardData.badge || "HD";
+
+        card.appendChild(leftDiv);
+        card.appendChild(badgeSpan);
 
         card.addEventListener("click", () => {
             document.querySelectorAll(".res-card").forEach(c => c.classList.remove("active"));
@@ -449,12 +642,12 @@ function renderDetails(media) {
         thumbnail.removeAttribute("src");
         thumbnail.hidden = true;
     }
-    thumbnail.alt = media.title;
+    thumbnail.alt = media.title || "";
 
     document.getElementById("media-type-badge").textContent = media.is_playlist ? "Playlist" : (media.platform ? media.platform.toUpperCase() : "Media");
     document.getElementById("duration-badge").textContent = formatDuration(media.duration);
-    document.getElementById("uploader").textContent = media.uploader;
-    document.getElementById("title").textContent = media.title;
+    document.getElementById("uploader").textContent = media.uploader || "Unknown";
+    document.getElementById("title").textContent = media.title || "Untitled";
     document.getElementById("views").textContent = media.view_count
         ? new Intl.NumberFormat().format(media.view_count)
         : "—";
@@ -468,9 +661,8 @@ function renderDetails(media) {
 
     const descriptionWrap = document.getElementById("description-wrap");
     descriptionWrap.hidden = !media.description;
-    document.getElementById("description").textContent = media.description;
+    document.getElementById("description").textContent = media.description || "";
 
-    // Thumbnail direct download chip
     if (media.thumbnail) {
         thumbnailDownloadBtn.hidden = false;
         thumbnailDownloadBtn.href = `/api/thumbnail?url=${encodeURIComponent(media.thumbnail)}&id=${encodeURIComponent(media.id || "video")}`;
@@ -478,7 +670,6 @@ function renderDetails(media) {
         thumbnailDownloadBtn.hidden = true;
     }
 
-    // Populate Quality Dropdown
     qualitySelect.replaceChildren();
     const bestOpt = new Option("Best available", "best");
     qualitySelect.add(bestOpt);
@@ -489,10 +680,9 @@ function renderDetails(media) {
 
     document.getElementById("playlist").checked = media.is_playlist;
 
-    // Populate Resolution Cards Grid
     renderResolutionCards(media.resolution_cards);
+    renderPlaylistPicker(media.playlist_entries);
 
-    // Populate Subtitles Dropdown
     subtitleLanguage.replaceChildren();
     for (const lang of media.subtitle_languages || []) {
         subtitleLanguage.add(new Option(lang.toUpperCase(), lang));
@@ -521,7 +711,7 @@ for (const radio of downloadForm.elements.mode) {
     radio.addEventListener("change", syncMode);
 }
 
-// Form Submit: Fetch Media Info or Search Keywords with Skeleton Loader
+// Form Submit: Fetch Media Info
 analyzeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     showError("");
@@ -536,7 +726,10 @@ analyzeForm.addEventListener("submit", async (event) => {
         const response = await fetch("/api/info", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: currentUrl }),
+            body: JSON.stringify({
+                url: currentUrl,
+                cookies_from_browser: cookiesBrowserSelect.value || null,
+            }),
         });
         const data = await readResponse(response);
 
@@ -602,7 +795,7 @@ function updatePipelineChecklist(stage) {
     }
 }
 
-// Render Progress Info & Skipped Failure Summaries
+// Render Progress Info & Failure Summaries (100% Safe DOM rendering)
 function renderProgress(job) {
     progressMessage.textContent = job.message || "Converting and downloading…";
 
@@ -614,7 +807,6 @@ function renderProgress(job) {
         progressPercent.textContent = `${job.progress.toFixed(1)}%`;
     }
 
-    // Update pipeline stage checklist
     updatePipelineChecklist(job.stage || "downloading");
 
     const details = [];
@@ -634,10 +826,16 @@ function renderProgress(job) {
         failureList.replaceChildren();
         for (const fail of job.failures) {
             const li = document.createElement("li");
-            li.innerHTML = `
-                <span>${fail.message || 'Media Item'}</span>
-                <span class="failure-reason">${fail.reason}</span>
-            `;
+
+            const itemSpan = document.createElement("span");
+            itemSpan.textContent = fail.message || 'Media Item';
+
+            const reasonSpan = document.createElement("span");
+            reasonSpan.className = "failure-reason";
+            reasonSpan.textContent = fail.reason || 'Failed';
+
+            li.appendChild(itemSpan);
+            li.appendChild(reasonSpan);
             failureList.appendChild(li);
         }
         failureReport.hidden = false;
@@ -670,7 +868,6 @@ async function pollJob(jobId) {
                 resultMessage.textContent = "Your media file is ready to save.";
             }
 
-            // Audio Player Preview
             if (job.filename && (job.filename.endsWith(".mp3") || job.filename.endsWith(".m4a") || job.filename.endsWith(".wav"))) {
                 audioPreview.src = currentFileDownloadUrl;
                 audioPlayerWrapper.hidden = false;
@@ -680,6 +877,7 @@ async function pollJob(jobId) {
 
             setBusy(downloadButton, false, "Start Conversion");
             showToast("Media ready to download!", "success");
+            sendDesktopNotification("Media Ready to Save!", job.filename || "Your converted media file is ready.");
 
             if (currentMediaInfo) {
                 saveToHistory(currentMediaInfo, job);
@@ -717,6 +915,7 @@ async function pollJob(jobId) {
 // Start Single Download Handler
 downloadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    requestNotificationPermission();
     showError("");
     resultCard.hidden = true;
     failureReport.hidden = true;
@@ -736,6 +935,8 @@ downloadForm.addEventListener("submit", async (event) => {
     progressSection.scrollIntoView({ behavior: "smooth", block: "start" });
 
     const mode = downloadForm.elements.mode.value;
+    const selectedItemsArray = Array.from(selectedPlaylistIndices);
+
     try {
         const response = await fetch("/api/jobs", {
             method: "POST",
@@ -751,8 +952,12 @@ downloadForm.addEventListener("submit", async (event) => {
                 start_time: startTimeInput.value.trim() || null,
                 end_time: endTimeInput.value.trim() || null,
                 playlist: document.getElementById("playlist").checked,
+                items_to_download: selectedItemsArray.length ? selectedItemsArray : null,
                 subtitles: includeSubtitles.checked,
                 subtitle_language: includeSubtitles.checked ? subtitleLanguage.value : null,
+                cookies_from_browser: cookiesBrowserSelect.value || null,
+                sponsorblock: (document.getElementById("sponsorblock") || {}).value || null,
+                mute_video: !!(document.getElementById("mute-video") || {}).checked,
             }),
         });
         const job = await readResponse(response);
@@ -847,7 +1052,7 @@ newDownloadButton.addEventListener("click", () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
-// Local Storage History & Storage Purge Management
+// Local Storage History & Storage Purge Management (100% Safe DOM rendering)
 const HISTORY_KEY = "mediadrop_download_history";
 
 function getHistory() {
@@ -862,9 +1067,9 @@ function saveToHistory(media, job) {
     let history = getHistory();
     const item = {
         id: media.id || Date.now().toString(),
-        title: media.title,
-        uploader: media.uploader,
-        thumbnail: media.thumbnail,
+        title: media.title || "Media",
+        uploader: media.uploader || "Creator",
+        thumbnail: media.thumbnail || "",
         filename: job.filename,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         url: currentUrl,
@@ -874,10 +1079,24 @@ function saveToHistory(media, job) {
     renderHistory();
 }
 
-function renderHistory() {
-    const history = getHistory();
+const historySearchInput = document.getElementById("history-search-input");
+if (historySearchInput) {
+    historySearchInput.addEventListener("input", () => {
+        renderHistory(historySearchInput.value.toLowerCase().trim());
+    });
+}
+
+function renderHistory(filterQuery = "") {
+    let history = getHistory();
     historyCountBadge.textContent = history.length;
     historyCountBadge.hidden = history.length === 0;
+
+    if (filterQuery) {
+        history = history.filter(item =>
+            (item.title || "").toLowerCase().includes(filterQuery) ||
+            (item.uploader || "").toLowerCase().includes(filterQuery)
+        );
+    }
 
     historyList.replaceChildren();
     emptyHistoryMsg.hidden = history.length > 0;
@@ -885,20 +1104,42 @@ function renderHistory() {
     for (const item of history) {
         const card = document.createElement("div");
         card.className = "history-card-item";
-        card.innerHTML = `
-            <img src="${item.thumbnail || ''}" alt="${item.title}">
-            <div style="flex:1; min-width:0;">
-                <div class="history-item-title">${item.title}</div>
-                <div class="history-item-meta">${item.uploader} • ${item.timestamp}</div>
-            </div>
-            <button class="btn-ghost" type="button">Re-fetch</button>
-        `;
-        card.querySelector("button").addEventListener("click", () => {
+
+        const img = document.createElement("img");
+        img.src = item.thumbnail || "";
+        img.alt = item.title || "";
+
+        const metaDiv = document.createElement("div");
+        metaDiv.style.flex = "1";
+        metaDiv.style.minWidth = "0";
+
+        const titleDiv = document.createElement("div");
+        titleDiv.className = "history-item-title";
+        titleDiv.textContent = item.title || "Untitled";
+
+        const infoDiv = document.createElement("div");
+        infoDiv.className = "history-item-meta";
+        infoDiv.textContent = `${item.uploader || 'Creator'} • ${item.timestamp || ''}`;
+
+        metaDiv.appendChild(titleDiv);
+        metaDiv.appendChild(infoDiv);
+
+        const btn = document.createElement("button");
+        btn.className = "btn-ghost";
+        btn.type = "button";
+        btn.textContent = "Re-fetch";
+
+        btn.addEventListener("click", () => {
             urlInput.value = item.url;
             clearButton.hidden = false;
             analyzeForm.requestSubmit();
             historySection.hidden = true;
         });
+
+        card.appendChild(img);
+        card.appendChild(metaDiv);
+        card.appendChild(btn);
+
         historyList.appendChild(card);
     }
 }
@@ -921,11 +1162,10 @@ purgeDiskBtn.addEventListener("click", async () => {
         const res = await fetch("/api/clean_downloads", { method: "POST" });
         const data = await res.json();
         showToast(`Freed ${data.freed_mb || 0} MB storage (${data.cleaned_items || 0} files purged)`, "success");
-        checkHealth();
+        checkDiagnostics();
     } catch {
         showToast("Storage purge failed", "error");
     }
 });
 
-// Initialize History on Load
 renderHistory();
