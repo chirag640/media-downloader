@@ -1,0 +1,48 @@
+name: Build and Release MediaDrop EXE
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-release:
+    name: Build Windows Executable & Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flask yt-dlp waitress pyinstaller
+
+      - name: Compile Executable using PyInstaller
+        run: |
+          python build_exe.py
+
+      - name: Create Zip Archive
+        shell: powershell
+        run: |
+          Compress-Archive -Path dist/MediaDropStudio.exe -DestinationPath MediaDropStudio-Windows-x64.zip
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        with:
+          name: MediaDrop Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: MediaDropStudio-Windows-x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

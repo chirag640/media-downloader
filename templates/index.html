@@ -101,7 +101,8 @@
                     </div>
                 </div>
 
-                <div class="transcript-actions" style="margin-top:16px;">
+                <div class="transcript-actions" style="margin-top:16px; display:flex; gap:10px;">
+                    <button id="update-ytdlp-btn" class="btn-primary" type="button">⚡ Update Engine (yt-dlp)</button>
                     <button id="refresh-diagnostics-btn" class="btn-secondary" type="button">Re-check System Status</button>
                 </div>
             </div>
@@ -506,9 +507,10 @@
                         <strong id="result-title">Conversion Finished!</strong>
                         <p id="result-message">Your file is ready to save.</p>
                         
-                        <!-- Equalizer Audio Preview -->
+                        <!-- Equalizer Audio Preview & Web Audio Waveform Canvas -->
                         <div id="audio-player-wrapper" class="player-wrapper" hidden>
-                            <audio id="audio-preview" controls></audio>
+                            <audio id="audio-preview" controls crossorigin="anonymous"></audio>
+                            <canvas id="audio-waveform-canvas" class="waveform-canvas" width="320" height="48"></canvas>
                             <div class="eq-bars">
                                 <span></span><span></span><span></span><span></span><span></span>
                             </div>

@@ -1172,5 +1172,30 @@ def clean_downloads():
     return jsonify(cleaned_items=count, freed_mb=round(freed_bytes / (1024 * 1024), 2))
 
 
+@app.post("/api/update_ytdlp")
+def update_ytdlp_engine():
+    import subprocess
+    try:
+        res = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if res.returncode == 0:
+            import importlib
+            importlib.reload(yt_dlp)
+            new_ver = getattr(yt_dlp, "__version__", "updated")
+            return jsonify(status="ok", message=f"Successfully updated yt-dlp to version {new_ver}", version=new_ver)
+        return jsonify(error=f"Update failed: {res.stderr[:200]}"), 500
+    except Exception as exc:
+        return jsonify(error=f"Update exception: {friendly_error(exc)}"), 500
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000)
+    try:
+        import waitress
+        print("Starting MediaDrop Production Studio Server (Waitress) at http://127.0.0.1:5000")
+        waitress.serve(app, host="127.0.0.1", port=5000)
+    except ImportError:
+        app.run(host="127.0.0.1", port=5000)

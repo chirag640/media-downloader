@@ -442,6 +442,19 @@ class AppTest(unittest.TestCase):
         sw_res = self.client.get("/static/sw.js")
         self.assertEqual(sw_res.status_code, 200)
 
+    def test_build_exe_script_and_update_ytdlp(self):
+        build_script = app.BASE_DIR / "build_exe.py"
+        self.assertTrue(build_script.exists())
+
+        workflow_file = app.BASE_DIR / ".github" / "workflows" / "build-release.yml"
+        self.assertTrue(workflow_file.exists())
+
+        # Test update_ytdlp route structure (mocked)
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            update_res = self.client.post("/api/update_ytdlp")
+            self.assertEqual(update_res.status_code, 200)
+
     def test_download_error_cleanup(self):
         FakeYoutubeDL.error = DownloadError("unavailable")
         job_id = self.start_job()

@@ -203,6 +203,23 @@ openDiagnosticsBtn.addEventListener("click", () => {
 closeDiagnosticsBtn.addEventListener("click", () => {
     diagnosticsModal.hidden = true;
 });
+const updateYtdlpBtn = document.getElementById("update-ytdlp-btn");
+if (updateYtdlpBtn) {
+    updateYtdlpBtn.addEventListener("click", async () => {
+        setBusy(updateYtdlpBtn, true, "Updating...");
+        try {
+            const res = await fetch("/api/update_ytdlp", { method: "POST" });
+            const data = await readResponse(res);
+            showToast(data.message || "yt-dlp updated successfully!", "success");
+            checkDiagnostics();
+        } catch (err) {
+            showToast(err.message, "error");
+        } finally {
+            setBusy(updateYtdlpBtn, false, "⚡ Update Engine (yt-dlp)");
+        }
+    });
+}
+
 refreshDiagnosticsBtn.addEventListener("click", () => {
     checkDiagnostics();
     showToast("Re-checked system diagnostics", "info");
@@ -1169,3 +1186,62 @@ purgeDiskBtn.addEventListener("click", async () => {
 });
 
 renderHistory();
+
+// Web Audio API Waveform Visualizer Setup
+const audioWaveformCanvas = document.getElementById("audio-waveform-canvas");
+let audioCtx = null;
+let audioAnalyser = null;
+let audioSourceNode = null;
+
+function setupAudioWaveform() {
+    if (!audioWaveformCanvas || !audioPreview) return;
+    audioPreview.addEventListener("play", () => {
+        if (!audioCtx) {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                audioAnalyser = audioCtx.createAnalyser();
+                audioAnalyser.fftSize = 64;
+                audioSourceNode = audioCtx.createMediaElementSource(audioPreview);
+                audioSourceNode.connect(audioAnalyser);
+                audioAnalyser.connect(audioCtx.destination);
+            } catch (e) {}
+        }
+        if (audioCtx && audioCtx.state === "suspended") {
+            audioCtx.resume();
+        }
+        drawWaveform();
+    });
+}
+
+function drawWaveform() {
+    if (!audioAnalyser || !audioWaveformCanvas) return;
+    const ctx = audioWaveformCanvas.getContext("2d");
+    const width = audioWaveformCanvas.width;
+    const height = audioWaveformCanvas.height;
+    const bufferLength = audioAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function render() {
+        if (audioPreview.paused || audioPreview.ended) return;
+        requestAnimationFrame(render);
+        audioAnalyser.getByteFrequencyData(dataArray);
+
+        ctx.clearRect(0, 0, width, height);
+        const barWidth = (width / bufferLength) * 2;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+            const barHeight = (dataArray[i] / 255) * height;
+            const gradient = ctx.createLinearGradient(0, height, 0, 0);
+            gradient.addColorStop(0, "#6366f1");
+            gradient.addColorStop(0.5, "#a855f7");
+            gradient.addColorStop(1, "#ec4899");
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
+            x += barWidth;
+        }
+    }
+    render();
+}
+setupAudioWaveform();
